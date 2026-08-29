@@ -82,7 +82,7 @@ class CameraBase(BaseModel):
             return str(v)
         return None
 
-    @field_validator("metadata", mode="before")
+    @field_validator("metadata", "source_metadata", mode="before")
     @classmethod
     def extract_metadata(cls, v: Any) -> dict:
         if isinstance(v, dict):

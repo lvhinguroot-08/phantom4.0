@@ -13,6 +13,7 @@ import { GISMapPage } from './pages/GISMapPage';
 import { AlertsIncidentsPage } from './pages/AlertsIncidentsPage';
 import { SystemHealthPage } from './pages/SystemHealthPage';
 import { VehicleIntelligencePage } from './pages/VehicleIntelligencePage';
+import { InvestigationsPage } from './pages/InvestigationsPage';
 
 export const AppContent: React.FC = () => {
   const [activeView, setActiveView] = useState<NavView>('dashboard');
@@ -37,8 +38,9 @@ export const AppContent: React.FC = () => {
       case 'coverage_gaps':
         return <GISMapPage />;
       case 'vehicle_tracking':
-      case 'investigations':
         return <VehicleIntelligencePage />;
+      case 'investigations':
+        return <InvestigationsPage />;
       case 'alerts':
       case 'incidents':
         return <AlertsIncidentsPage />;

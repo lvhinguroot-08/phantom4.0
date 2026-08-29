@@ -82,11 +82,12 @@ if (-not $useDocker) {
     } catch {}
 
     if (-not $alreadyOnline) {
-        $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
-        if ($pythonCmd) {
-            Write-Host "  [*] Launching background backend server (FastAPI / uvicorn)..." -ForegroundColor Yellow
-            Start-Process -FilePath "python" -ArgumentList "-m uvicorn app.main:app --host 0.0.0.0 --port 8000" -WorkingDirectory "backend" -WindowStyle Hidden
+        $pythonExe = "python"
+        if (Test-Path "backend\.venv\Scripts\python.exe") {
+            $pythonExe = (Resolve-Path "backend\.venv\Scripts\python.exe").Path
         }
+        Write-Host "  [*] Launching background backend server (FastAPI / uvicorn)..." -ForegroundColor Yellow
+        Start-Process -FilePath $pythonExe -ArgumentList "-m uvicorn app.main:app --host 0.0.0.0 --port 8000" -WorkingDirectory "backend" -WindowStyle Hidden
     }
 }
 
@@ -137,9 +138,9 @@ if (Test-Path "camera_sources.yaml") {
 
 # Step 7: Run Automated Smoke Test
 Write-Host "[7/7] Running Master Smoke Test..." -ForegroundColor Yellow
-$smokeTest = Get-Command python -ErrorAction SilentlyContinue
-if ($smokeTest -and (Test-Path "backend\scripts\smoke_test.py")) {
-    python backend\scripts\smoke_test.py
+$smokeTestScript = "backend\scripts\smoke_test.py"
+if (Test-Path $smokeTestScript) {
+    & $pythonExe $smokeTestScript
 } else {
     Write-Host "  [+] Smoke test passed (Core endpoints verified)." -ForegroundColor Green
 }

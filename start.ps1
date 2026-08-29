@@ -25,7 +25,11 @@ try {
 
 if (-not $backendRunning) {
     Write-Host "  [+] Starting FastAPI backend on port 8000..." -ForegroundColor Green
-    Start-Process -FilePath "python" -ArgumentList "-m uvicorn app.main:app --host 0.0.0.0 --port 8000" -WorkingDirectory "backend" -WindowStyle Hidden
+    $pythonExe = "python"
+    if (Test-Path "backend\.venv\Scripts\python.exe") {
+        $pythonExe = (Resolve-Path "backend\.venv\Scripts\python.exe").Path
+    }
+    Start-Process -FilePath $pythonExe -ArgumentList "-m uvicorn app.main:app --host 0.0.0.0 --port 8000" -WorkingDirectory "backend" -WindowStyle Hidden
 }
 
 # Start frontend preview/dev

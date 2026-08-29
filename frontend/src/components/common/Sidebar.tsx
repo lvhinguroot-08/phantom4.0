@@ -92,7 +92,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           badgeType: 'alert',
         },
         { id: 'incidents', label: 'Incidents', icon: FileSpreadsheet },
-        { id: 'investigations', label: 'Investigations', icon: Compass },
+        { id: 'investigations', label: 'AI Copilot', icon: Compass, badge: 'AGENT', badgeType: 'live' },
       ],
     },
     {
