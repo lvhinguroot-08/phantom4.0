@@ -1,0 +1,18 @@
+{
+  "include": [
+    "backend"
+  ],
+  "exclude": [
+    "**/node_modules",
+    "**/__pycache__"
+  ],
+  "extraPaths": [
+    "backend",
+    "backend/app",
+    "."
+  ],
+  "pythonPath": "C:\\Users\\YUG PATEL\\AppData\\Local\\Programs\\Python\\Python311\\python.exe",
+  "typeCheckingMode": "basic",
+  "pythonVersion": "3.11",
+  "pythonPlatform": "Windows"
+}
