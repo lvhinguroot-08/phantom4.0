@@ -48,10 +48,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as exc:
         logger.warning(f"Database health check encountered exception on startup: {exc}")
 
+    # 3. Start Sentinel Camera Grid Dynamic Catalogue Discovery Service
+    try:
+        from app.services.sentinel_catalogue_service import sentinel_catalogue_service
+        sentinel_catalogue_service.start_periodic_sync()
+    except Exception as exc:
+        logger.warning(f"Failed to start Sentinel Catalogue background discovery: {exc}")
+
     yield
 
-    # 3. Graceful shutdown
+    # 4. Graceful shutdown
     logger.info("Initiating graceful shutdown...")
+    try:
+        from app.services.sentinel_catalogue_service import sentinel_catalogue_service
+        sentinel_catalogue_service.stop_periodic_sync()
+    except Exception:
+        pass
+
     try:
         from app.services.stream_gateway_service import stream_gateway_service
         stream_gateway_service.cleanup_all()

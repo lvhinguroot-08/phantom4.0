@@ -40,6 +40,31 @@ async def get_camera_health_summary(
 
 
 @router.get(
+    "/cameras/health/sentinel",
+    response_model=ApiResponse[Dict[str, Any]],
+    summary="Sentinel Camera Grid Ingestion Health & Resilience Telemetry",
+    description="Returns live Sentinel connection state, catalogue sync status, discovered vs active cameras, and reconnect telemetry.",
+)
+async def get_sentinel_health(request: Request) -> ApiResponse[Dict[str, Any]]:
+    from app.services.sentinel_catalogue_service import sentinel_catalogue_service
+    health = sentinel_catalogue_service.get_catalogue_health()
+    req_id = getattr(request.state, "request_id", None)
+    return ApiResponse(success=True, data=health, request_id=req_id)
+
+
+@router.get(
+    "/sentinel/status",
+    response_model=ApiResponse[Dict[str, Any]],
+    summary="Sentinel Grid Ingestion Telemetry Alias",
+)
+async def get_sentinel_status_alias(request: Request) -> ApiResponse[Dict[str, Any]]:
+    from app.services.sentinel_catalogue_service import sentinel_catalogue_service
+    health = sentinel_catalogue_service.get_catalogue_health()
+    req_id = getattr(request.state, "request_id", None)
+    return ApiResponse(success=True, data=health, request_id=req_id)
+
+
+@router.get(
     "/cameras/health/scale-status",
     response_model=ApiResponse[Dict[str, Any]],
     summary="Statewide Scale & Hierarchical Regional Health Status",

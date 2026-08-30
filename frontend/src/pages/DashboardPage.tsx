@@ -8,6 +8,7 @@ import { AlertPanel } from '../components/alerts/AlertPanel';
 import { LoadingState } from '../components/common/LoadingError';
 import { useBackendStatus } from '../context/BackendStatusContext';
 import { useRealtimeEvents } from '../context/RealtimeEventContext';
+import { AITestingDashboard } from '../components/dashboard/AITestingDashboard';
 import {
   Camera as CamIcon,
   Wifi,
@@ -21,7 +22,10 @@ import {
   Grid,
   Filter,
   Layers,
+  Sparkles,
+  Tv,
 } from 'lucide-react';
+
 
 export const DashboardPage: React.FC = () => {
   const { isConnected } = useBackendStatus();
@@ -195,13 +199,83 @@ export const DashboardPage: React.FC = () => {
     return true;
   });
 
+  const [activeTab, setActiveTab] = useState<'ai_hub' | 'cctv_wall'>('ai_hub');
+
   // Display initial 4 cameras for the dashboard CCTV quad matrix
   const displayQuad = filteredCameras.slice(0, 4);
 
   return (
     <div className="dashboard-page-container">
-      {/* 8-Card Telemetry Ribbon */}
-      <section className="metrics-ribbon-grid" aria-label="Key Platform Metrics">
+      {/* Top View Selector Tabs */}
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          backgroundColor: '#111927',
+          padding: '12px 20px',
+          borderRadius: '10px',
+          border: '1px solid #1e293b',
+          marginBottom: '16px',
+        }}
+      >
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button
+            onClick={() => setActiveTab('ai_hub')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '8px 18px',
+              borderRadius: '6px',
+              border: activeTab === 'ai_hub' ? '1px solid #38bdf8' : '1px solid transparent',
+              backgroundColor: activeTab === 'ai_hub' ? 'rgba(56, 189, 248, 0.18)' : 'transparent',
+              color: activeTab === 'ai_hub' ? '#38bdf8' : '#94a3b8',
+              fontWeight: 700,
+              fontSize: '13px',
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+            }}
+          >
+            <Sparkles size={16} />
+            <span>AI INTELLIGENCE & REAL-WORLD TESTING (YOLO + ANPR)</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('cctv_wall')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '8px 18px',
+              borderRadius: '6px',
+              border: activeTab === 'cctv_wall' ? '1px solid #38bdf8' : '1px solid transparent',
+              backgroundColor: activeTab === 'cctv_wall' ? 'rgba(56, 189, 248, 0.18)' : 'transparent',
+              color: activeTab === 'cctv_wall' ? '#38bdf8' : '#94a3b8',
+              fontWeight: 700,
+              fontSize: '13px',
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+            }}
+          >
+            <Tv size={16} />
+            <span>STATEWIDE CCTV WALL (4-QUAD MATRIX)</span>
+          </button>
+        </div>
+
+        <div style={{ fontSize: '11px', color: '#64748b', fontFamily: 'monospace' }}>
+          PHANTOM C2 // HIGH-PERFORMANCE INFERENCE NOMINAL
+        </div>
+      </div>
+
+      {/* View Content */}
+      {activeTab === 'ai_hub' ? (
+        <AITestingDashboard />
+      ) : (
+        <>
+          {/* 8-Card Telemetry Ribbon */}
+          <section className="metrics-ribbon-grid" aria-label="Key Platform Metrics">
+
         <MetricCard
           title="TOTAL CAMERAS"
           value={coverage?.total_cameras || cameras.length}
@@ -352,6 +426,9 @@ export const DashboardPage: React.FC = () => {
           />
         </aside>
       </div>
+      </>
+      )}
     </div>
   );
 };
+

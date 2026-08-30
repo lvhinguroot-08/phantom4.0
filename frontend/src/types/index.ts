@@ -82,11 +82,20 @@ export interface Camera {
   longitude: number;
   camera_type: CameraType;
   status: CameraStatus;
+  connection_state?: string;
   ip_address?: string;
   is_ptz_capable: boolean;
   ai_enabled: boolean;
   location_description?: string;
   last_heartbeat?: string;
+  last_seen?: string;
+  codec?: string;
+  resolution?: string;
+  stream_type?: string;
+  reconnect_attempt?: number;
+  last_error?: string;
+  whep_url?: string;
+  hls_url?: string;
   fps?: number;
   streams?: CameraStream[];
 }

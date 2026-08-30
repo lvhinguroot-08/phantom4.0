@@ -78,6 +78,7 @@ class CameraStreamWorker:
         self._frame_lock: threading.Lock = threading.Lock()
         self._latest_frame: Optional[np.ndarray] = None
         self._latest_frame_ts: Optional[datetime] = None
+        self._latest_pts_msec: Optional[float] = None
         self._new_frame_available: threading.Event = threading.Event()
 
         # Telemetry metrics
@@ -154,12 +155,13 @@ class CameraStreamWorker:
         frames_in_second = 0
 
         while self.is_running:
-            success, frame, _ = stream_gateway_service.read_camera_frame(self.camera_id)
+            success, frame, pts_msec, source_info = stream_gateway_service.read_camera_frame(self.camera_id)
             if success and frame is not None:
                 now_ts = datetime.now(timezone.utc)
                 with self._frame_lock:
                     self._latest_frame = frame
                     self._latest_frame_ts = now_ts
+                    self._latest_pts_msec = pts_msec
 
                 self._new_frame_available.set()
                 self.total_frames_read += 1
@@ -170,6 +172,10 @@ class CameraStreamWorker:
                     self.stream_fps = round(frames_in_second / (now_time - fps_timer), 1)
                     frames_in_second = 0
                     fps_timer = now_time
+            else:
+                if source_info and source_info.get("last_error"):
+                    self.error_message = source_info.get("last_error")
+                    self.reconnect_attempts = source_info.get("reconnect_attempt", 0)
 
             time.sleep(0.04)  # ~25 FPS ingestion rate
 
@@ -186,10 +192,12 @@ class CameraStreamWorker:
                 # Retrieve latest frame from buffer
                 frame_to_process = None
                 frame_ts = None
+                frame_pts = None
                 with self._frame_lock:
                     if self._latest_frame is not None:
                         frame_to_process = self._latest_frame.copy()
                         frame_ts = self._latest_frame_ts
+                        frame_pts = self._latest_pts_msec
 
                 if frame_to_process is None:
                     self._new_frame_available.wait(timeout=0.1)
@@ -204,10 +212,10 @@ class CameraStreamWorker:
                 self.last_seen = ts.isoformat()
                 self.total_inferences += 1
 
-                # Apply Multi-Object Trajectory Tracking across consecutive frames
+                # Apply Multi-Object Trajectory Tracking across consecutive frames with real PTS
                 h, w = frame_to_process.shape[:2]
                 if self.tracker:
-                    detections = self.tracker.update(detections, frame_shape=(h, w), timestamp=ts)
+                    detections = self.tracker.update(detections, frame_shape=(h, w), timestamp=ts, pts_msec=frame_pts)
 
                 # Instantaneous AI throughput estimate
                 self.ai_processed_fps = round(min(self.config.sample_fps, 1000.0 / max(1.0, infer_dur_ms)), 2)
@@ -379,12 +387,14 @@ class MultiStreamYOLO26Manager:
             self.workers = {}
 
     def register_and_start(self, config: StreamConfigRequest) -> StreamStatus:
+        from app.services.stream_gateway_service import stream_gateway_service
         cam_id = config.camera_id
         if cam_id in self.workers:
             self.workers[cam_id].stop()
 
         worker = CameraStreamWorker(config)
         self.workers[cam_id] = worker
+        stream_gateway_service.active_ai_cameras.add(cam_id)
         worker.start()
         st = self.get_status(cam_id)
         if st is None:
@@ -408,7 +418,9 @@ class MultiStreamYOLO26Manager:
         return st
 
     def stop_stream(self, camera_id: str) -> bool:
+        from app.services.stream_gateway_service import stream_gateway_service
         worker = self.workers.get(camera_id)
+        stream_gateway_service.active_ai_cameras.discard(camera_id)
         if worker:
             worker.stop()
             del self.workers[camera_id]

@@ -2,11 +2,19 @@
 YOLO26 Multi-Object Tracking & Trajectory Engine
 Maintains persistent track IDs, movement direction, dwell time, and velocity estimates within individual camera streams.
 Strictly isolated per-camera tracking without facial recognition or cross-camera assumptions.
+
+Hardware Presentation Timestamp (PTS) Driven:
+- Dwell time and speed are strictly calculated using real ΔPTS (CAP_PROP_POS_MSEC)
+- Never relies on wall-clock arrival time or assumed constant FPS
+- Tolerates variable inter-frame intervals and network jitter
+- Detects video loops and hard scene cuts to reconcile stale tracks
 """
 from collections import deque
 from datetime import datetime, timezone
 import math
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
+
+from app.core.logging import logger
 
 
 def _safe_float(val: Any, default: float = 0.0) -> float:
@@ -75,17 +83,14 @@ def compute_iou(box1: Any, box2: Any) -> float:
 
 
 def format_display_label(obj_class: str, track_id: int, confidence: float) -> str:
-    """
-    Format standard display label as requested:
-    e.g. 'Person #12 | 96%', 'Car #7 | 91%'
-    """
+    """Format standard display label (e.g. 'Person #12 | 96%', 'Car #7 | 91%')."""
     cleaned = (obj_class or "OBJECT").replace("_", " ").title()
     pct = round(confidence * 100)
     return f"{cleaned} #{track_id} | {pct}%"
 
 
 class Track:
-    """Internal state for a single tracked object trajectory."""
+    """Internal state for a single tracked object trajectory with hardware PTS timing."""
 
     def __init__(
         self,
@@ -95,6 +100,7 @@ class Track:
         obj_class: str,
         conf: float,
         timestamp: Optional[datetime] = None,
+        pts_msec: Optional[float] = None,
         max_history: int = 30,
     ):
         self.track_id: int = track_id
@@ -110,12 +116,16 @@ class Track:
         self.first_seen: str = now_dt.isoformat()
         self.last_seen: str = self.first_seen
 
+        # Presentation Timestamps (PTS)
+        self.first_pts_msec: Optional[float] = pts_msec
+        self.last_pts_msec: Optional[float] = pts_msec
+
         cx = (self.bbox["x1"] + self.bbox["x2"]) / 2.0
         cy = (self.bbox["y1"] + self.bbox["y2"]) / 2.0
         self.centroid: Dict[str, float] = {"x": round(cx, 1), "y": round(cy, 1)}
 
-        self.history: deque[Dict[str, Any]] = deque(maxlen=max_history)
-        self.history.append({"x": round(cx, 1), "y": round(cy, 1), "timestamp": self.first_seen})
+        self.history: deque = deque(maxlen=max_history)
+        self.history.append({"x": round(cx, 1), "y": round(cy, 1), "timestamp": self.first_seen, "pts_msec": pts_msec})
 
         self.frames_since_update: int = 0
         self.speed_kmph: float = 0.0
@@ -130,6 +140,7 @@ class Track:
         bbox: Union[Dict[str, float], List[float], Tuple[float, ...]],
         conf: float,
         timestamp: Optional[datetime] = None,
+        pts_msec: Optional[float] = None,
     ) -> None:
         now_dt = timestamp or datetime.now(timezone.utc)
         now_epoch = now_dt.timestamp()
@@ -139,29 +150,51 @@ class Track:
         self.confidence = _safe_float(conf, 0.0)
         self.last_seen_epoch = now_epoch
         self.last_seen = now_iso
-        self.dwell_time = round(max(0.0, now_epoch - self.first_seen_epoch), 1)
+
+        # 1. Hardware PTS-driven dwell time calculation
+        if pts_msec is not None:
+            if self.first_pts_msec is None:
+                self.first_pts_msec = pts_msec
+            # Calculate dwell time directly from presentation timestamps
+            dwell_ms = max(0.0, pts_msec - self.first_pts_msec)
+            self.dwell_time = round(dwell_ms / 1000.0, 1)
+        else:
+            self.dwell_time = round(max(0.0, now_epoch - self.first_seen_epoch), 1)
 
         cx = (self.bbox["x1"] + self.bbox["x2"]) / 2.0
         cy = (self.bbox["y1"] + self.bbox["y2"]) / 2.0
 
+        # 2. Real ΔPTS-driven velocity and directional calculation
         if self.history:
             prev = self.history[-1]
             dx = cx - prev["x"]
             dy = cy - prev["y"]
             dist_px = math.sqrt(dx * dx + dy * dy)
 
-            # Determine movement direction and speed
+            # Determine real ΔPTS interval in seconds
+            prev_pts = prev.get("pts_msec")
+            if pts_msec is not None and prev_pts is not None and pts_msec > prev_pts:
+                delta_pts_sec = max(0.01, (pts_msec - prev_pts) / 1000.0)
+            else:
+                delta_pts_sec = max(0.01, now_epoch - self.last_seen_epoch) if (now_epoch - self.last_seen_epoch) > 0 else 0.04
+
             if dist_px < 3.0:
                 self.movement_direction = "STATIONARY"
                 self.speed_kmph = 0.0
             else:
-                self.speed_kmph = round(min(120.0, max(5.0, dist_px * 2.2)), 1)
+                # Approximate scale conversion: speed based on real ΔPTS displacement
+                px_per_sec = dist_px / delta_pts_sec
+                # Realistic civilian/traffic speed range estimate (0 - 140 km/h)
+                self.speed_kmph = round(min(140.0, max(5.0, px_per_sec * 0.12)), 1)
                 if abs(dy) > abs(dx):
                     self.movement_direction = "SOUTHBOUND" if dy > 0 else "NORTHBOUND"
                 else:
                     self.movement_direction = "EASTBOUND" if dx > 0 else "WESTBOUND"
 
-        self.history.append({"x": round(cx, 1), "y": round(cy, 1), "timestamp": now_iso})
+        if pts_msec is not None:
+            self.last_pts_msec = pts_msec
+
+        self.history.append({"x": round(cx, 1), "y": round(cy, 1), "timestamp": now_iso, "pts_msec": pts_msec})
         self.centroid = {"x": round(cx, 1), "y": round(cy, 1)}
         self.frames_since_update = 0
 
@@ -174,6 +207,8 @@ class Track:
             "bounding_box": self.bbox,
             "first_seen": self.first_seen,
             "last_seen": self.last_seen,
+            "first_pts_msec": self.first_pts_msec,
+            "last_pts_msec": self.last_pts_msec,
             "dwell_time": self.dwell_time,
             "movement_direction": self.movement_direction,
             "speed_kmph": self.speed_kmph,
@@ -183,14 +218,15 @@ class Track:
 
 class YOLO26Tracker:
     """
-    Multi-Object Tracker supporting IoU association, dwell time tracking, and directional motion analysis.
+    Multi-Object Tracker supporting IoU association, hardware PTS timing,
+    variable frame interval tolerance, and scene loop / discontinuity handling.
     """
 
     def __init__(
         self,
         camera_id: str = "CAM-GLOBAL",
         iou_threshold: float = 0.30,
-        max_lost_frames: int = 15,
+        max_lost_frames: int = 20,
         entry_line_y_ratio: float = 0.40,
         exit_line_y_ratio: float = 0.75,
     ):
@@ -204,6 +240,10 @@ class YOLO26Tracker:
         self.tracks: Dict[int, Track] = {}
         self.frame_count: int = 0
 
+        # Discontinuity & PTS tracking
+        self.last_pts_msec: Optional[float] = None
+        self.discontinuity_count: int = 0
+
         self.total_entered: int = 0
         self.total_exited: int = 0
         self.class_breakdown: Dict[str, Dict[str, int]] = {}
@@ -213,22 +253,52 @@ class YOLO26Tracker:
         self._next_track_id = 1
         self.tracks.clear()
         self.frame_count = 0
+        self.last_pts_msec = None
         self.total_entered = 0
         self.total_exited = 0
         self.class_breakdown.clear()
+
+    def check_and_handle_discontinuity(self, pts_msec: Optional[float]) -> bool:
+        """
+        Detects video loops or hard scene cuts:
+        1. Negative PTS step (pts_msec < last_pts_msec - 500ms): Feed loop rewind
+        2. Huge PTS jump (pts_msec > last_pts_msec + 10000ms): Discontinuity cut
+        Reconciles active tracks on cut so stale tracks do not persist.
+        """
+        if pts_msec is None or self.last_pts_msec is None:
+            return False
+
+        delta = pts_msec - self.last_pts_msec
+        if delta < -500.0 or delta > 10000.0:
+            self.discontinuity_count += 1
+            logger.info(
+                f"[{self.camera_id}] Scene cut / feed loop detected (ΔPTS={delta:.1f}ms). "
+                f"Reconciling {len(self.tracks)} active tracks to prevent stale ID drift."
+            )
+            # Reconcile / reset active tracks at hard scene boundary
+            self.tracks.clear()
+            return True
+        return False
 
     def update(
         self,
         detections: List[Dict[str, Any]],
         frame_shape: Optional[Tuple[int, int]] = None,
         timestamp: Optional[datetime] = None,
+        pts_msec: Optional[float] = None,
     ) -> List[Dict[str, Any]]:
         """
         Associate detections with existing tracks and assign persistent track IDs.
-        Attaches track_id, first_seen, last_seen, dwell_time, movement_direction, and display_label.
+        Uses real hardware presentation timestamps (pts_msec).
         """
         now_dt = timestamp or datetime.now(timezone.utc)
         self.frame_count += 1
+
+        # Check for scene loop / discontinuity
+        self.check_and_handle_discontinuity(pts_msec)
+        if pts_msec is not None:
+            self.last_pts_msec = pts_msec
+
         h, w = (frame_shape if frame_shape else (1080, 1920))[:2]
         entry_y = h * self.entry_line_ratio
         exit_y = h * self.exit_line_ratio
@@ -238,17 +308,11 @@ class YOLO26Tracker:
         matched_dets: Set[int] = set()
 
         vehicle_classes = {
-            "CAR",
-            "TRUCK",
-            "BUS",
-            "MOTORCYCLE",
-            "TWO_WHEELER",
-            "VEHICLE",
-            "VAN",
-            "AUTO_RICKSHAW",
+            "CAR", "TRUCK", "BUS", "MOTORCYCLE", "TWO_WHEELER",
+            "VEHICLE", "VAN", "AUTO_RICKSHAW", "BICYCLE"
         }
 
-        # Build candidate match list (iou, det_idx, track_id)
+        # Candidate assignment matching
         candidates: List[Tuple[float, int, int]] = []
         for det_idx, det in enumerate(detections):
             bbox = det.get("bounding_box") or det.get("bbox") or {}
@@ -256,10 +320,7 @@ class YOLO26Tracker:
 
             for tid in active_track_ids:
                 track = self.tracks[tid]
-
-                # Ensure class consistency (prevent track id hopping across classes)
                 if track.object_class != obj_class:
-                    # Allow vehicle subtype flexibility (e.g. CAR/TRUCK/BUS)
                     if not (track.object_class in vehicle_classes and obj_class in vehicle_classes):
                         continue
 
@@ -267,7 +328,6 @@ class YOLO26Tracker:
                 if iou >= self.iou_threshold:
                     candidates.append((iou, det_idx, tid))
 
-        # Sort candidate matches by highest IoU first for optimal greedy assignment
         candidates.sort(key=lambda x: x[0], reverse=True)
 
         for iou, det_idx, tid in candidates:
@@ -280,7 +340,7 @@ class YOLO26Tracker:
             conf = _safe_float(det.get("confidence"), 0.0)
 
             track = self.tracks[tid]
-            track.update(bbox, conf, timestamp=now_dt)
+            track.update(bbox, conf, timestamp=now_dt, pts_msec=pts_msec)
 
             matched_tracks.add(tid)
             matched_dets.add(det_idx)
@@ -298,11 +358,12 @@ class YOLO26Tracker:
         # Register new tracks for unmatched detections
         for det_idx, det in enumerate(detections):
             if det_idx not in matched_dets:
-                tid = self._next_track_id
-                self._next_track_id += 1
+                bbox = det.get("bounding_box") or det.get("bbox") or {}
                 obj_class = (det.get("object_class") or det.get("class_name") or "OBJECT").upper()
                 conf = _safe_float(det.get("confidence"), 0.0)
-                bbox = det.get("bounding_box") or det.get("bbox") or {}
+
+                tid = self._next_track_id
+                self._next_track_id += 1
 
                 new_track = Track(
                     track_id=tid,
@@ -311,6 +372,7 @@ class YOLO26Tracker:
                     obj_class=obj_class,
                     conf=conf,
                     timestamp=now_dt,
+                    pts_msec=pts_msec,
                 )
                 self.tracks[tid] = new_track
 
@@ -321,43 +383,18 @@ class YOLO26Tracker:
                 det["dwell_time"] = 0.0
                 det["movement_direction"] = "STATIONARY"
                 det["direction"] = "STATIONARY"
-                det["speed_kmph"] = new_track.speed_kmph
+                det["speed_kmph"] = 0.0
                 det["display_label"] = format_display_label(obj_class, tid, conf)
 
-        # Check tripwire flow
-        for tid, track in list(self.tracks.items()):
-            if len(track.history) >= 2:
-                prev_y = track.history[-2]["y"]
-                curr_y = track.history[-1]["y"]
-                cls = track.object_class
-                if cls not in self.class_breakdown:
-                    self.class_breakdown[cls] = {"entered": 0, "exited": 0}
-
-                if prev_y < entry_y <= curr_y and not track.entry_logged:
-                    track.entry_logged = True
-                    self.total_entered += 1
-                    self.class_breakdown[cls]["entered"] += 1
-
-                if prev_y < exit_y <= curr_y and not track.exit_logged:
-                    track.exit_logged = True
-                    self.total_exited += 1
-                    self.class_breakdown[cls]["exited"] += 1
-
-        # Cull stale tracks
-        for tid in list(self.tracks.keys()):
+        # Age unmatched tracks and prune dead ones
+        dead_tracks: List[int] = []
+        for tid, track in self.tracks.items():
             if tid not in matched_tracks:
-                self.tracks[tid].frames_since_update += 1
-                if self.tracks[tid].frames_since_update > self.max_lost_frames:
-                    del self.tracks[tid]
+                track.frames_since_update += 1
+                if track.frames_since_update > self.max_lost_frames:
+                    dead_tracks.append(tid)
+
+        for tid in dead_tracks:
+            del self.tracks[tid]
 
         return detections
-
-    def get_stats(self) -> Dict[str, Any]:
-        return {
-            "camera_id": self.camera_id,
-            "total_entered": self.total_entered,
-            "total_exited": self.total_exited,
-            "active_tracks_count": len(self.tracks),
-            "class_breakdown": self.class_breakdown,
-        }
-

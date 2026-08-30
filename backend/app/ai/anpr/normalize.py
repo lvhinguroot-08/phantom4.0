@@ -25,15 +25,109 @@ GUJARAT_RTO_CODES = {
 }
 
 
-def normalize_plate_text(raw: Optional[str]) -> str:
-    """Uppercase and strip spaces/hyphens/punctuation.
-    
-    Deterministic formatting cleanup that strictly preserves alphanumeric characters
-    without fabricating characters.
+# Character disambiguation mapping tables for Indian ANPR OCR errors
+CHAR_TO_DIGIT = {
+    "O": "0", "D": "0", "Q": "0", "U": "0",
+    "I": "1", "L": "1", "T": "1",
+    "Z": "2",
+    "J": "3",
+    "A": "4",
+    "S": "5",
+    "G": "6", "C": "6",
+    "B": "8",
+}
+
+DIGIT_TO_CHAR = {
+    "0": "O",
+    "1": "I",
+    "2": "Z",
+    "3": "J",
+    "4": "A",
+    "5": "S",
+    "6": "G",
+    "8": "B",
+}
+
+
+def disambiguate_plate(raw_plate: str) -> str:
     """
+    Applies position-specific OCR disambiguation for Indian license plate syntax:
+    - Positions 0-1: State Code (Letters, e.g. GJ, DL, MH, KA, etc.)
+    - Positions 2-3: District / RTO Code (Digits, e.g. 05, 01, 27)
+    - Middle: Series (0 to 3 Letters, e.g. AB, CD, A)
+    - Suffix: Registration Number (1 to 4 Digits, e.g. 1234, 0001)
+    """
+    if not raw_plate:
+        return ""
+    
+    # Strip non-alphanumerics
+    cleaned = _STRIP_CHARS.sub("", raw_plate).upper()
+    
+    # Strip common IND prefix/suffix if present at edges
+    if cleaned.startswith("IND") and len(cleaned) >= 9:
+        cleaned = cleaned[3:]
+    elif cleaned.endswith("IND") and len(cleaned) >= 9:
+        cleaned = cleaned[:-3]
+
+    n = len(cleaned)
+    if n < 4:
+        return cleaned
+
+    # Check for Bharat (BH) series: 2 digits + BH + 4 digits + 1-2 letters
+    if "BH" in cleaned[1:4] and n >= 8:
+        chars = list(cleaned)
+        # Year digits
+        for i in range(0, 2):
+            if chars[i] in CHAR_TO_DIGIT:
+                chars[i] = CHAR_TO_DIGIT[chars[i]]
+        # 'BH'
+        chars[2] = "B"
+        chars[3] = "H"
+        # 4 digits
+        for i in range(4, min(8, n)):
+            if chars[i] in CHAR_TO_DIGIT:
+                chars[i] = CHAR_TO_DIGIT[chars[i]]
+        # 1-2 letters
+        for i in range(8, n):
+            if chars[i] in DIGIT_TO_CHAR:
+                chars[i] = DIGIT_TO_CHAR[chars[i]]
+        return "".join(chars)
+
+    # Standard Indian Plate Syntax (6-11 characters, e.g., GJ05AB1234, GJ1A1234)
+    if 6 <= n <= 11:
+        chars = list(cleaned)
+        # 1. First 2 positions are State Letters (e.g. GJ)
+        for i in range(min(2, n)):
+            if chars[i] in DIGIT_TO_CHAR:
+                chars[i] = DIGIT_TO_CHAR[chars[i]]
+        
+        # 2. Next 2 positions are RTO Digits (e.g. 05)
+        for i in range(2, min(4, n)):
+            if chars[i] in CHAR_TO_DIGIT:
+                chars[i] = CHAR_TO_DIGIT[chars[i]]
+
+        # 3. Determine suffix digit count (usually last 4, or last 1-4 digits)
+        digit_count = 4 if n >= 8 else max(1, n - 4)
+        for i in range(n - digit_count, n):
+            if chars[i] in CHAR_TO_DIGIT:
+                chars[i] = CHAR_TO_DIGIT[chars[i]]
+
+        # 4. Middle positions (between RTO and final digits) are Series Letters
+        for i in range(4, n - digit_count):
+            if chars[i] in DIGIT_TO_CHAR:
+                chars[i] = DIGIT_TO_CHAR[chars[i]]
+
+        return "".join(chars)
+
+    return cleaned
+
+
+def normalize_plate_text(raw: Optional[str]) -> str:
+    """Uppercase, strip spaces/hyphens/punctuation, and apply syntax disambiguation."""
     if raw is None:
         return ""
-    return _STRIP_CHARS.sub("", str(raw)).strip().upper()
+    raw_str = str(raw).strip()
+    return disambiguate_plate(raw_str)
 
 
 def looks_like_indian_plate(normalized: Optional[str]) -> bool:
@@ -67,7 +161,7 @@ def extract_plate_structure(normalized: Optional[str]) -> Dict[str, Any]:
             "rto_code": rto_padded,
             "series": series or "",
             "number": number,
-            "rto_jurisdiction": rto_name,
+            "rto_jurisdiction": rto_name or f"RTO {rto_padded}",
             "is_gujarat": state == "GJ",
         }
         
@@ -94,4 +188,5 @@ def extract_plate_structure(normalized: Optional[str]) -> Dict[str, Any]:
         "rto_jurisdiction": None,
         "is_gujarat": norm.startswith("GJ"),
     }
+
 

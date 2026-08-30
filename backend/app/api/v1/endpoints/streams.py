@@ -66,6 +66,18 @@ async def get_live_hls_segment(
 
 
 @router.get(
+    "/streams/status",
+    response_model=ApiResponse[Dict[str, Any]],
+    summary="Query Statewide Stream Fleet Status",
+    description="Returns aggregate health metrics across all active camera streams.",
+)
+async def get_all_streams_status(request: Request) -> ApiResponse[Dict[str, Any]]:
+    summary = stream_gateway_service.get_gateway_summary()
+    req_id = getattr(request.state, "request_id", None)
+    return ApiResponse(success=True, data=summary, request_id=req_id)
+
+
+@router.get(
     "/streams/{camera_id}/status",
     response_model=ApiResponse[Dict[str, Any]],
     summary="Query Live Stream Ingestion Status",

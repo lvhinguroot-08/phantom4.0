@@ -33,8 +33,12 @@ from app.api.v1.endpoints.stream_ai_routes import router as stream_ai_router
 from app.api.v1.endpoints.vehicle_tracking_api import router as vehicle_tracking_router
 from app.api.v1.endpoints.anpr_pipeline_routes import router as anpr_pipeline_router
 from app.api.v1.endpoints.live_detection_ws import router as live_detection_ws_router
+from app.api.v1.endpoints.unified_ai_routes import router as unified_ai_router
 
 api_v1_router = APIRouter()
+
+# Unified PHANTOM 2.0 AI Testing & Processing Endpoints (/upload, /yolo/detect, /anpr/recognize, /process, /results/{id})
+api_v1_router.include_router(unified_ai_router)
 
 api_v1_router.include_router(system_health_router)
 api_v1_router.include_router(info_router)
@@ -71,4 +75,5 @@ api_v1_router.include_router(stream_ai_router)
 api_v1_router.include_router(vehicle_tracking_router)
 api_v1_router.include_router(anpr_pipeline_router)
 api_v1_router.include_router(live_detection_ws_router)
+
 

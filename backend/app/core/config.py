@@ -1,7 +1,11 @@
+import os
+import json
 from typing import List, Optional, Union
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-import json
+
+# Mandatory TCP enforcement for OpenCV RTSP capture pipeline
+os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp")
 
 
 class Settings(BaseSettings):
@@ -100,10 +104,19 @@ class Settings(BaseSettings):
     STREAM_GATEWAY_CACHE_DIR: str = "./var/hls_cache"
     STREAM_FFMPEG_BIN: str = "ffmpeg"
     CAMERA_SOURCES_FILE: str = "camera_sources.yaml"
-    ENABLE_TEST_STREAM_FALLBACK: bool = True
+    ENABLE_TEST_STREAM_FALLBACK: bool = False
     STREAM_GATEWAY_TIMEOUT_SECONDS: int = 8
     HLS_SEGMENT_DURATION_SECONDS: int = 2
     HLS_LIST_SIZE: int = 4
+
+    # Sentinel CCTV Integration Contract
+    SENTINEL_BASE_URL: str = "https://live.corp8.cloud"
+    SENTINEL_CATALOGUE_PATH: str = "/api/ingest"
+    SENTINEL_CONNECT_TIMEOUT: float = 5.0
+    SENTINEL_READ_TIMEOUT: float = 10.0
+    SENTINEL_RETRY_MAX_SECONDS: int = 30
+    SENTINEL_SYNC_INTERVAL_SECONDS: int = 60
+    SENTINEL_ALLOW_PRIVATE_IPS: bool = False
 
     # Edge Buffering & Offline Resilience
     EDGE_BUFFER_ENABLED: bool = True

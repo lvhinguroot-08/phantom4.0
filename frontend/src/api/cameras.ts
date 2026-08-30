@@ -106,115 +106,45 @@ export const camerasApi = {
       method: 'POST',
     }),
 
-  // Direct authorized fallback to the Hackathon live source catalog
+  getSentinelHealth: () =>
+    apiClient<ApiResponse<{
+      sentinel_connection: string;
+      catalogue_state: string;
+      base_url: string;
+      total_discovered_cameras: number;
+      live_cameras: number;
+      offline_cameras: number;
+      connecting_cameras: number;
+      reconnecting_cameras: number;
+      ai_active_cameras: number;
+      last_sync: string | null;
+      last_error: string | null;
+      reconnect_attempt: number;
+    }>>('/cameras/health/sentinel'),
+
+  // Dynamic Sentinel Ingest Discovery (Zero hardcoded IDs, locations, or counts)
   fetchDirectCorp8Catalog: async (): Promise<Camera[]> => {
-    const ACTIVE_IDS = ['13', '14', '15', '16', '6', '17', '22', '23', '26', '27', '29'];
-
-    // Real Gujarat geocoordinates for each Corp8 camera location
-    const LOCATION_COORDS: Record<string, { lat: number; lng: number; district: string; city: string }> = {
-      // Ahmedabad City cameras
-      '1':  { lat: 23.0258, lng: 72.5873, district: 'Ahmedabad', city: 'Ahmedabad' },        // Chiman Bhai Bridge
-      '2':  { lat: 23.0339, lng: 72.5623, district: 'Ahmedabad', city: 'Ahmedabad' },        // Janpath
-      '3':  { lat: 23.0469, lng: 72.5560, district: 'Ahmedabad', city: 'Ahmedabad' },        // ONGC Office, Chandkheda
-      '4':  { lat: 23.0130, lng: 72.5635, district: 'Ahmedabad', city: 'Ahmedabad' },        // Paldi Circle
-      '5':  { lat: 23.0796, lng: 72.5412, district: 'Ahmedabad', city: 'Ahmedabad' },        // Visat Teen Rasta
-      '13': { lat: 23.0362, lng: 72.5558, district: 'Ahmedabad', city: 'Ahmedabad' },        // CN Vidhyalaya
-      '14': { lat: 23.0283, lng: 72.5070, district: 'Ahmedabad', city: 'Ahmedabad' },        // Delight
-      '15': { lat: 23.0455, lng: 72.5345, district: 'Ahmedabad', city: 'Ahmedabad' },        // Suvidha Park
-      '16': { lat: 23.0810, lng: 72.5450, district: 'Ahmedabad', city: 'Ahmedabad' },        // Visat P2
-
-      // Junagadh cameras
-      '6':  { lat: 21.5222, lng: 70.4579, district: 'Junagadh', city: 'Junagadh' },          // Timbavadi Gate
-      '8':  { lat: 21.5192, lng: 70.4674, district: 'Junagadh', city: 'Junagadh' },          // Majewadi Gate
-      '9':  { lat: 21.5340, lng: 70.4390, district: 'Junagadh', city: 'Junagadh' },          // New Bypass Circle
-      '10': { lat: 21.5230, lng: 70.4620, district: 'Junagadh', city: 'Junagadh' },          // Char Chowk Road
-      '11': { lat: 21.5175, lng: 70.4535, district: 'Junagadh', city: 'Junagadh' },          // Dolatpara
-
-      // Gir Somnath
-      '7':  { lat: 20.9060, lng: 70.3670, district: 'Gir Somnath', city: 'Veraval' },       // Hero Showroom, Gir Somnath
-
-      // Gandhinagar / Adalaj
-      '12': { lat: 23.1652, lng: 72.5772, district: 'Gandhinagar', city: 'Adalaj' },         // Tri Mandir Adalaj Tollnaka
-
-      // Rajkot
-      '17': { lat: 22.3039, lng: 70.8022, district: 'Rajkot', city: 'Rajkot' },              // Rajkot Bus Port
-      '18': { lat: 22.2970, lng: 70.7985, district: 'Rajkot', city: 'Rajkot' },              // Rajkot CCTV
-
-      // Navsari / Gandevi / Bilimora
-      '19': { lat: 20.8120, lng: 73.0025, district: 'Navsari', city: 'Gandevi' },            // Khaparia Gram Panchayat, Gandevi
-      '27': { lat: 20.7682, lng: 72.9631, district: 'Navsari', city: 'Bilimora' },           // Bilimora 1
-      '28': { lat: 20.7700, lng: 72.9650, district: 'Navsari', city: 'Bilimora' },           // Bilimora 2
-      '29': { lat: 20.7665, lng: 72.9610, district: 'Navsari', city: 'Bilimora' },           // Bilimora 3
-
-      // Patan
-      '20': { lat: 23.8480, lng: 72.1210, district: 'Patan', city: 'Mohanpura' },            // Mohanpura
-      '21': { lat: 23.8550, lng: 72.1265, district: 'Patan', city: 'Patan' },                // Patan Dethali Char Rasta
-
-      // Morbi / BK Mervada
-      '22': { lat: 22.8120, lng: 70.8375, district: 'Morbi', city: 'Morbi' },                // BK Mervada Tran Rasta
-
-      // Kheda / Kheram
-      '23': { lat: 22.7504, lng: 72.6875, district: 'Kheda', city: 'Kheram' },               // Kheram
-
-      // Gandhinagar / Dehgam
-      '24': { lat: 23.1996, lng: 72.8186, district: 'Gandhinagar', city: 'Dehgam' },         // Dehgam
-
-      // Ahmedabad rural / Dhanori
-      '25': { lat: 23.1450, lng: 72.7350, district: 'Ahmedabad', city: 'Dhanori' },          // Dhanori
-
-      // Narmada / Tankal
-      '26': { lat: 21.8730, lng: 73.4965, district: 'Narmada', city: 'Tankal' },             // Tankal
-
-      // Kutch / Gandhidham
-      '30': { lat: 23.0753, lng: 70.1337, district: 'Kutch', city: 'Gandhidham' },           // Gandhidham Rambaugh
-    };
-
     try {
-      const res = await fetch('https://live.corp8.cloud/api/cameras', {
-        headers: { Accept: 'application/json' },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const rawCams = data.cameras || [];
-        return rawCams.map((c: any, index: number) => {
-          const streamId = c.duration ? String(c.id) : ACTIVE_IDS[index % ACTIVE_IDS.length];
-          const coords = LOCATION_COORDS[String(c.id)];
-
-          // Extract a clean display name from the raw location string
-          const rawLoc: string = c.location || '';
-          const displayName = rawLoc.replace(/^\d+\s*/, '').trim() || c.name || `Camera ${c.id}`;
-
-          return {
-            id: String(c.id),
-            camera_code: `CAM-${String(c.id).padStart(2, '0')}`,
-            name: displayName,
-            district: coords?.district || 'Gujarat',
-            city: coords?.city || 'Gujarat',
-            taluka: coords?.city,
-            latitude: coords?.lat ?? 22.3 + (Number(c.id) % 10) * 0.15,
-            longitude: coords?.lng ?? 71.0 + (Number(c.id) % 8) * 0.2,
-            camera_type: 'PTZ',
-            status: 'ONLINE',
-            is_ptz_capable: true,
-            ai_enabled: true,
-            location_description: rawLoc,
-            fps: c.fps || 30,
-            department_name: 'Gujarat Police / Smart City',
-            streams: [
-              {
-                camera_id: String(c.id),
-                protocol: 'HLS' as const,
-                stream_url: `https://live.corp8.cloud/stream/${streamId}`,
-                is_active: true,
-                fps: c.fps || 30,
-              },
-            ],
-          };
-        });
+      const res = await apiClient<PaginatedResponse<Camera>>('/cameras?page_size=50');
+      if (res && res.data && res.data.length > 0) {
+        return res.data;
       }
     } catch {
-      // Fallback
+      // Backend request fallback to direct catalogue probe
     }
+
+    try {
+      const directRes = await fetch('/api/v1/sentinel/status');
+      if (directRes.ok) {
+        const payload = await directRes.json();
+        if (payload.data && payload.data.cameras) {
+          return payload.data.cameras;
+        }
+      }
+    } catch {
+      // Fallback handled smoothly by UI
+    }
+
     return [];
   },
 };

@@ -37,8 +37,12 @@ def pytest_collection_modifyitems(config, items):
                     "test_api_v1_info",
                     "test_request_id_generated_automatically",
                     "test_custom_request_id_propagated",
+                    "test_01_yolo_object_detection",
+                    "test_02_anpr_plate_localization_and_ocr",
+                    "test_03_yolo_anpr_combined_video_processing",
                 ):
                     item.add_marker(skip_db)
+
 
 
 @pytest_asyncio.fixture(scope="session")

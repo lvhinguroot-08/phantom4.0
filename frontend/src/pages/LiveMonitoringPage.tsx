@@ -30,13 +30,53 @@ export const LiveMonitoringPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [selectedCamera, setSelectedCamera] = useState<Camera | null>(null);
   const [globalAiHud, setGlobalAiHud] = useState<boolean>(true);
+  const [sentinelState, setSentinelState] = useState<{
+    status: string;
+    catalogue: string;
+    total: number;
+    live: number;
+    error?: string;
+    reconnect_attempt: number;
+  }>({
+    status: 'ONLINE',
+    catalogue: 'SYNCED',
+    total: 0,
+    live: 0,
+    reconnect_attempt: 0,
+  });
+
+  const fetchSentinelHealth = async () => {
+    try {
+      const res = await fetch('/api/v1/cameras/health/sentinel');
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.data) {
+          const d = json.data;
+          setSentinelState({
+            status: d.sentinel_connection || 'ONLINE',
+            catalogue: d.catalogue_state || 'SYNCED',
+            total: d.total_discovered_cameras || 0,
+            live: d.live_cameras || 0,
+            error: d.last_error,
+            reconnect_attempt: d.reconnect_attempt || 0,
+          });
+        }
+      }
+    } catch {
+      setSentinelState((prev) => ({
+        ...prev,
+        status: 'DEGRADED',
+        catalogue: 'OFFLINE',
+      }));
+    }
+  };
 
   const fetchCameras = async () => {
     setIsLoading(true);
     try {
       let loaded: Camera[] = [];
       try {
-        const res = await camerasApi.list({ page_size: 30 });
+        const res = await camerasApi.list({ page_size: 50 });
         if (res && res.data && res.data.length > 0) {
           loaded = res.data;
         }
@@ -56,6 +96,11 @@ export const LiveMonitoringPage: React.FC = () => {
 
   useEffect(() => {
     fetchCameras();
+    fetchSentinelHealth();
+    const interval = setInterval(() => {
+      fetchSentinelHealth();
+    }, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   const districts = Array.from(new Set(cameras.map((c) => c.district).filter(Boolean)));
@@ -68,46 +113,79 @@ export const LiveMonitoringPage: React.FC = () => {
   const countToDisplay = layout === '1' ? 1 : layout === '4' ? 4 : layout === '9' ? 9 : layout === '16' ? 16 : 30;
   const displayCameras = filteredCameras.slice(0, countToDisplay);
 
+  const isSentinelDegraded = sentinelState.status !== 'ONLINE';
+
   return (
     <div className="live-monitoring-page">
-      {/* Top AI Telemetry Strip */}
-      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 bg-slate-900/90 border-b border-cyan-500/20 backdrop-blur-md text-xs font-mono">
-        <div className="flex items-center gap-3 flex-wrap">
-          <div className="flex items-center gap-1.5 text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/30">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-            <span className="font-bold">YOLO26 & ANPR LIVE ENGINE ACTIVE</span>
+      {/* Sentinel Connection & Resilience Status Banner */}
+      <div className={`flex flex-wrap items-center justify-between gap-3 px-4 py-2 text-xs font-mono border-b ${
+        isSentinelDegraded
+          ? 'bg-rose-950/80 border-rose-500/40 text-rose-200'
+          : 'bg-slate-900/95 border-cyan-500/20 text-slate-300'
+      }`}>
+        <div className="flex items-center gap-4 flex-wrap">
+          <div className="flex items-center gap-2">
+            <span className="text-slate-400 font-bold">SENTINEL CONNECTION:</span>
+            {isSentinelDegraded ? (
+              <span className="flex items-center gap-1.5 text-amber-400 font-bold px-2 py-0.5 rounded bg-amber-950/70 border border-amber-500/40">
+                <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+                ● DEGRADED
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5 text-emerald-400 font-bold px-2 py-0.5 rounded bg-emerald-950/70 border border-emerald-500/40">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                ● ONLINE
+              </span>
+            )}
           </div>
-          <div className="flex items-center gap-1 text-slate-300">
-            <Car size={13} className="text-cyan-400" />
-            <span>Vehicles: <b className="text-white">68 Active</b></span>
+
+          <div className="flex items-center gap-2">
+            <span className="text-slate-400 font-bold">CAMERA CATALOGUE:</span>
+            {isSentinelDegraded ? (
+              <span className="flex items-center gap-1 text-rose-300 font-bold">
+                ○ OFFLINE (RETRYING AUTOMATICALLY...)
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 text-emerald-300 font-bold">
+                ● SYNCED ({sentinelState.total || filteredCameras.length} DISCOVERED)
+              </span>
+            )}
           </div>
-          <div className="flex items-center gap-1 text-slate-300">
-            <Scan size={13} className="text-amber-400" />
-            <span>Plates Scanned: <b className="text-white">34/min</b></span>
-          </div>
-          <div className="flex items-center gap-1 text-slate-300">
-            <User size={13} className="text-cyan-300" />
-            <span>Pedestrians: <b className="text-white">18 Ingested</b></span>
-          </div>
-          <div className="flex items-center gap-1 text-rose-400 bg-rose-950/60 px-2 py-0.5 rounded border border-rose-500/30">
-            <ShieldAlert size={13} className="text-rose-400 animate-pulse" />
-            <span>Hotlist Matches: <b className="text-white">2 CRITICAL</b></span>
-          </div>
+
+          {isSentinelDegraded && sentinelState.reconnect_attempt > 0 && (
+            <span className="text-amber-300 text-xs animate-pulse">
+              Retry Attempt #{sentinelState.reconnect_attempt} (Exponential Backoff)
+            </span>
+          )}
         </div>
 
-        {/* Master AI HUD Toggle Switch */}
-        <button
-          onClick={() => setGlobalAiHud(!globalAiHud)}
-          className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-bold transition-all shadow ${
-            globalAiHud
-              ? 'bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-400/50 shadow-emerald-900/40'
-              : 'bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700'
-          }`}
-          title="Toggle AI Bounding Boxes & Attributes across all video streams"
-        >
-          <Cpu size={13} className={globalAiHud ? 'animate-pulse' : ''} />
-          <span>GLOBAL AI HUD: {globalAiHud ? 'ACTIVE' : 'OFF'}</span>
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => {
+              fetchCameras();
+              fetchSentinelHealth();
+            }}
+            className="flex items-center gap-1 px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs border border-slate-700 transition-colors"
+            title="Refresh Ingest Stream Registry"
+          >
+            <RefreshCw size={12} className={isLoading ? 'animate-spin' : ''} />
+            <span>SYNC CATALOGUE</span>
+          </button>
+
+          {/* Master AI HUD Toggle Switch */}
+          <button
+            onClick={() => setGlobalAiHud(!globalAiHud)}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-bold transition-all shadow ${
+              globalAiHud
+                ? 'bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-400/50 shadow-emerald-900/40'
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700'
+            }`}
+            title="Toggle AI Bounding Boxes & Attributes across all video streams"
+          >
+            <Cpu size={13} className={globalAiHud ? 'animate-pulse' : ''} />
+            <span>GLOBAL AI HUD: {globalAiHud ? 'ACTIVE' : 'OFF'}</span>
+          </button>
+        </div>
       </div>
 
       {/* Top Controls Toolbar */}
