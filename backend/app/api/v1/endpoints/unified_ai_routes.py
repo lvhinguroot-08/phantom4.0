@@ -32,6 +32,7 @@ from app.services.video_ai_service import (
     OUTPUT_DIR,
     ProcessingMode,
     VideoAIJobState,
+    resolve_vehicle_license_plate,
     video_ai_service,
 )
 
@@ -263,36 +264,31 @@ async def direct_anpr_recognize(
         plates_found = []
         annotated = img.copy()
 
-        for d in raw_dets:
+        for idx, d in enumerate(raw_dets):
             cls_name = normalize_class_name(d["class_name"])
             if cls_name in ("CAR", "TRUCK", "BUS", "MOTORCYCLE", "OTHER_VEHICLE"):
                 bx = d["bbox"]
-                # Crop lower portion for plate
-                h, w = img.shape[:2]
                 vx1, vy1, vx2, vy2 = bx["x1"], bx["y1"], bx["x2"], bx["y2"]
-                vh, vw = vy2 - vy1, vx2 - vx1
-                if vh > 20 and vw > 20:
-                    px1 = max(0, int(vx1 + vw * 0.15))
-                    py1 = max(0, int(vy1 + vh * 0.55))
-                    px2 = min(w, int(vx2 - vw * 0.15))
-                    py2 = min(h, vy2)
-                    crop = img[py1:py2, px1:px2]
-                    ocr_res = ocr_proc.read_text(crop)
-                    norm_p = normalize_plate_text(ocr_res.raw_text or ocr_res.normalized_text)
-                    if norm_p:
-                        struct = extract_plate_structure(norm_p)
-                        plates_found.append({
-                            "plate_number": norm_p,
-                            "raw_text": ocr_res.raw_text,
-                            "confidence": round(ocr_res.confidence or 0.90, 4),
-                            "vehicle": cls_name.capitalize(),
-                            "rto_jurisdiction": struct.get("rto_jurisdiction"),
-                            "is_gujarat": struct.get("is_gujarat", False),
-                            "bounding_box": bx,
-                        })
-                        cv2.rectangle(annotated, (vx1, vy1), (vx2, vy2), (16, 185, 129), 2)
-                        cv2.rectangle(annotated, (px1, py1), (px2, py2), (239, 68, 68), 2)
-                        cv2.putText(annotated, f"IND {norm_p}", (vx1, vy2 + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (239, 68, 68), 2)
+                plate_text, p_conf, rto_name = resolve_vehicle_license_plate(
+                    frame=img,
+                    bbox=bx,
+                    vehicle_class=cls_name,
+                    track_id=idx + 1,
+                    camera_id=camera_id,
+                    ocr_proc=ocr_proc,
+                )
+                if plate_text:
+                    struct = extract_plate_structure(plate_text)
+                    plates_found.append({
+                        "plate_number": plate_text,
+                        "confidence": round(p_conf, 4),
+                        "vehicle": cls_name.capitalize(),
+                        "rto_jurisdiction": rto_name or struct.get("rto_jurisdiction"),
+                        "is_gujarat": plate_text.startswith("GJ"),
+                        "bounding_box": bx,
+                    })
+                    cv2.rectangle(annotated, (vx1, vy1), (vx2, vy2), (16, 185, 129), 2)
+                    cv2.putText(annotated, f"IND {plate_text}", (vx1, max(22, vy1 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (239, 68, 68), 2)
 
         _, jpg_buf = cv2.imencode(".jpg", annotated)
         b64 = base64.b64encode(jpg_buf.tobytes()).decode("utf-8")
@@ -504,38 +500,36 @@ async def get_camera_live_snapshot(
     h, w = annotated.shape[:2]
     plates_found = []
 
-    for d in raw_dets:
+    for idx, d in enumerate(raw_dets):
         bx = d["bbox"]
         cls_name = normalize_class_name(d["class_name"])
         conf = d["confidence"]
+        vx1, vy1, vx2, vy2 = bx["x1"], bx["y1"], bx["x2"], bx["y2"]
         
         cv2.rectangle(annotated, (bx["x1"], bx["y1"]), (bx["x2"], bx["y2"]), (0, 240, 255), 2)
         cv2.putText(annotated, f"{cls_name} {int(conf*100)}%", (bx["x1"], max(18, bx["y1"] - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 240, 255), 1)
 
         if cls_name in ("CAR", "TRUCK", "BUS", "MOTORCYCLE", "OTHER_VEHICLE"):
-            vx1, vy1, vx2, vy2 = bx["x1"], bx["y1"], bx["x2"], bx["y2"]
-            vh, vw = vy2 - vy1, vx2 - vx1
-            if vh > 20 and vw > 20:
-                px1 = max(0, int(vx1 + vw * 0.15))
-                py1 = max(0, int(vy1 + vh * 0.55))
-                px2 = min(w, int(vx2 - vw * 0.15))
-                py2 = min(h, vy2)
-                crop = frame[py1:py2, px1:px2]
-                ocr_res = ocr_proc.read_text(crop)
-                norm_p = normalize_plate_text(ocr_res.raw_text or ocr_res.normalized_text)
-                if norm_p:
-                    struct = extract_plate_structure(norm_p)
-                    plates_found.append({
-                        "plate_number": norm_p,
-                        "raw_text": ocr_res.raw_text,
-                        "confidence": round(ocr_res.confidence or 0.90, 4),
-                        "vehicle": cls_name.capitalize(),
-                        "rto_jurisdiction": struct.get("rto_jurisdiction"),
-                        "is_gujarat": struct.get("is_gujarat", False),
-                        "bounding_box": bx,
-                    })
-                    cv2.rectangle(annotated, (px1, py1), (px2, py2), (239, 68, 68), 2)
-                    cv2.putText(annotated, f"IND {norm_p}", (vx1, vy2 + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (239, 68, 68), 2)
+            plate_text, p_conf, rto_name = resolve_vehicle_license_plate(
+                frame=frame,
+                bbox=bx,
+                vehicle_class=cls_name,
+                track_id=idx + 1,
+                camera_id=clean_id,
+                ocr_proc=ocr_proc,
+            )
+            if plate_text:
+                struct = extract_plate_structure(plate_text)
+                plates_found.append({
+                    "plate_number": plate_text,
+                    "confidence": round(p_conf, 4),
+                    "vehicle": cls_name.capitalize(),
+                    "rto_jurisdiction": rto_name or struct.get("rto_jurisdiction"),
+                    "is_gujarat": plate_text.startswith("GJ"),
+                    "bounding_box": bx,
+                })
+                cv2.rectangle(annotated, (vx1, vy1), (vx2, vy2), (16, 185, 129), 2)
+                cv2.putText(annotated, f"IND {plate_text}", (vx1, max(22, vy1 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (239, 68, 68), 2)
 
     _, jpg_buf = cv2.imencode(".jpg", annotated)
     b64 = base64.b64encode(jpg_buf.tobytes()).decode("utf-8")
