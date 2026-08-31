@@ -43,6 +43,21 @@ export interface ANPRTableItem {
   total_sightings: number;
 }
 
+export interface ObjectAnalytics {
+  total_objects_tracked: number;
+  unique_vehicles_count: number;
+  cars_count: number;
+  buses_count: number;
+  trucks_count: number;
+  motorcycles_count: number;
+  pedestrians_count: number;
+  bicycles_count: number;
+  peak_frame_density: number;
+  avg_confidence_pct: number;
+  congestion_level: 'LOW' | 'MODERATE' | 'HIGH';
+  vehicle_distribution: Record<string, number>;
+}
+
 export interface VideoAIJobState {
   job_id: string;
   mode: "yolo" | "anpr" | "yolo_anpr";
@@ -59,6 +74,7 @@ export interface VideoAIJobState {
   class_breakdown: Record<string, number>;
   recent_detections: DetectionEvent[];
   anpr_results: ANPRTableItem[];
+  analytics?: ObjectAnalytics;
   latest_frame_b64?: string;
   download_url?: string;
   video_url?: string;

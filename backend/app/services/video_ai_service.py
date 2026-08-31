@@ -1,4 +1,4 @@
-﻿"""
+"""
 PHANTOM Unified Video & Stream AI Intelligence Engine
 Performs asynchronous frame-by-frame YOLO, ANPR, and combined YOLO+ANPR processing
 with real-time live preview buffer, tactical HUD annotations, and Gujarati RTO OCR.
@@ -76,6 +76,21 @@ class ANPRTableItem(BaseModel):
     total_sightings: int = 1
 
 
+class ObjectAnalytics(BaseModel):
+    total_objects_tracked: int = 0
+    unique_vehicles_count: int = 0
+    cars_count: int = 0
+    buses_count: int = 0
+    trucks_count: int = 0
+    motorcycles_count: int = 0
+    pedestrians_count: int = 0
+    bicycles_count: int = 0
+    peak_frame_density: int = 0
+    avg_confidence_pct: float = 0.0
+    congestion_level: str = "LOW"  # LOW, MODERATE, HIGH
+    vehicle_distribution: Dict[str, float] = Field(default_factory=dict)
+
+
 class VideoAIJobState(BaseModel):
     job_id: str
     mode: ProcessingMode = ProcessingMode.YOLO_ANPR
@@ -92,6 +107,7 @@ class VideoAIJobState(BaseModel):
     class_breakdown: Dict[str, int] = Field(default_factory=dict)
     recent_detections: List[DetectionEvent] = Field(default_factory=list)
     anpr_results: List[ANPRTableItem] = Field(default_factory=list)
+    analytics: ObjectAnalytics = Field(default_factory=ObjectAnalytics)
     latest_frame_b64: Optional[str] = None
     download_url: Optional[str] = None
     video_url: Optional[str] = None
@@ -259,9 +275,25 @@ def process_video_ai_task(
         job.total_frames = total_frames
         job.fps = round(video_fps, 2)
 
-        # Output video writer
-        fourcc = getattr(cv2, "VideoWriter_fourcc", cv2.VideoWriter.fourcc)(*"mp4v")
-        out = cv2.VideoWriter(output_path, fourcc, video_fps, (width, height))
+        # Output video writer using PyAV for direct HTML5 H.264 playback, with cv2 fallback
+        use_av = False
+        av_container = None
+        av_stream = None
+        cv_out = None
+
+        try:
+            import av
+            av_container = av.open(output_path, mode="w")
+            av_stream = av_container.add_stream("h264", rate=int(round(video_fps)))
+            av_stream.width = width
+            av_stream.height = height
+            av_stream.pix_fmt = "yuv420p"
+            av_stream.options = {"crf": "23", "preset": "veryfast"}
+            use_av = True
+        except Exception as av_err:
+            logger.warning(f"PyAV H264 init fallback to cv2: {av_err}")
+            fourcc = getattr(cv2, "VideoWriter_fourcc", cv2.VideoWriter.fourcc)(*"mp4v")
+            cv_out = cv2.VideoWriter(output_path, fourcc, video_fps, (width, height))
 
         frame_step = max(1, int(round(video_fps / max(1.0, min(video_fps, sample_fps))))) if sample_fps > 0 else 1
 
@@ -270,6 +302,9 @@ def process_video_ai_task(
         total_dets = 0
         total_plates = 0
         class_counts: Dict[str, int] = {}
+        unique_vehicle_tracks: Set[int] = set()
+        confidences_list: List[float] = []
+        peak_frame_density = 0
         anpr_dict: Dict[str, ANPRTableItem] = {}
         all_recent_events: List[DetectionEvent] = []
 
@@ -301,14 +336,19 @@ def process_video_ai_task(
                 raw_dets = detector.detect_frame(frame, confidence_threshold=conf_threshold)
                 tracked_dets = tracker.update(raw_dets, frame_shape=(height, width), pts_msec=pts_sec * 1000.0)
 
+                peak_frame_density = max(peak_frame_density, len(tracked_dets))
+
                 for d in tracked_dets:
                     raw_cls = d.get("class_name", "OBJECT")
                     canon_cls = normalize_class_name(raw_cls)
                     conf = float(d.get("confidence", 0.0))
                     bbox = d.get("bbox", {})
                     tid = d.get("track_id")
+                    confidences_list.append(conf)
 
                     is_vehicle = canon_cls in ("CAR", "TRUCK", "BUS", "MOTORCYCLE", "OTHER_VEHICLE", "BICYCLE")
+                    if is_vehicle and tid:
+                        unique_vehicle_tracks.add(tid)
 
                     # Mode filtering
                     if mode == ProcessingMode.ANPR and not is_vehicle:
@@ -322,8 +362,8 @@ def process_video_ai_task(
                         "is_vehicle": is_vehicle,
                     }
 
-                    # ANPR Plate Extraction & OCR
-                    if (mode in (ProcessingMode.ANPR, ProcessingMode.YOLO_ANPR)) and is_vehicle:
+                    # ANPR Plate Extraction & OCR (Always check on vehicle bounding boxes)
+                    if is_vehicle:
                         track_key = f"track_{tid}" if tid else f"box_{bbox.get('x1')}_{bbox.get('y1')}"
                         
                         # Check cache
@@ -427,7 +467,14 @@ def process_video_ai_task(
                 total_frames=total_frames,
                 time_str=time_str,
             )
-            out.write(annotated_frame)
+
+            # Write output frame
+            if use_av and av_stream is not None and av_container is not None:
+                av_frame = av.VideoFrame.from_ndarray(annotated_frame, format="bgr24")
+                for packet in av_stream.encode(av_frame):
+                    av_container.mux(packet)
+            elif cv_out is not None:
+                cv_out.write(annotated_frame)
 
             # Update live preview buffer and progress every 2 frames
             if frame_idx % 2 == 0 or frame_idx == total_frames:
@@ -448,6 +495,42 @@ def process_video_ai_task(
                 _, jpg_buffer = cv2.imencode(".jpg", small_annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
                 b64_frame = base64.b64encode(jpg_buffer.tobytes()).decode("utf-8")
 
+                # Compute rich real-time analytics
+                cars_c = class_counts.get("CAR", 0)
+                buses_c = class_counts.get("BUS", 0)
+                trucks_c = class_counts.get("TRUCK", 0)
+                motos_c = class_counts.get("MOTORCYCLE", 0)
+                pers_c = class_counts.get("PERSON", 0)
+                bikes_c = class_counts.get("BICYCLE", 0)
+                tot_veh = cars_c + buses_c + trucks_c + motos_c
+
+                distrib = {}
+                if tot_veh > 0:
+                    distrib = {
+                        "Car": round((cars_c / tot_veh) * 100.0, 1),
+                        "Bus": round((buses_c / tot_veh) * 100.0, 1),
+                        "Truck": round((trucks_c / tot_veh) * 100.0, 1),
+                        "Motorcycle": round((motos_c / tot_veh) * 100.0, 1),
+                    }
+
+                avg_conf = round(sum(confidences_list) / len(confidences_list) * 100.0, 1) if confidences_list else 0.0
+                cong_level = "HIGH" if peak_frame_density >= 7 else ("MODERATE" if peak_frame_density >= 3 else "LOW")
+
+                job.analytics = ObjectAnalytics(
+                    total_objects_tracked=total_dets,
+                    unique_vehicles_count=len(unique_vehicle_tracks) or tot_veh,
+                    cars_count=cars_c,
+                    buses_count=buses_c,
+                    trucks_count=trucks_c,
+                    motorcycles_count=motos_c,
+                    pedestrians_count=pers_c,
+                    bicycles_count=bikes_c,
+                    peak_frame_density=peak_frame_density,
+                    avg_confidence_pct=avg_conf,
+                    congestion_level=cong_level,
+                    vehicle_distribution=distrib,
+                )
+
                 job.frames_processed = frame_idx
                 job.progress_percent = min(100.0, progress)
                 job.elapsed_seconds = round(elapsed, 1)
@@ -456,12 +539,20 @@ def process_video_ai_task(
                 job.total_detections = total_dets
                 job.total_plates_recognized = len(anpr_dict)
                 job.class_breakdown = class_counts
-                job.recent_detections = all_recent_events[-50:]  # Keep last 50 events
+                job.recent_detections = all_recent_events[-60:]  # Keep last 60 events
                 job.anpr_results = list(anpr_dict.values())
                 job.latest_frame_b64 = f"data:image/jpeg;base64,{b64_frame}"
 
         cap.release()
-        out.release()
+        if use_av and av_container is not None:
+            try:
+                for packet in av_stream.encode():
+                    av_container.mux(packet)
+                av_container.close()
+            except Exception as e:
+                logger.warning(f"Error finalizing PyAV container: {e}")
+        elif cv_out is not None:
+            cv_out.release()
 
         if job.status != JobStatus.CANCELLED:
             job.status = JobStatus.COMPLETED

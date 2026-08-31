@@ -20,12 +20,21 @@ import {
   Radio,
   FileVideo,
   Eye,
+  BarChart3,
+  TrendingUp,
+  Gauge,
+  Truck,
+  Bus,
+  Bike,
+  RotateCcw,
+  Zap,
 } from 'lucide-react';
 import {
   aiTestingApi,
   DetectionEvent,
   ANPRTableItem,
   VideoAIJobState,
+  ObjectAnalytics,
 } from '../../api/aiTestingApi';
 
 export const AITestingDashboard: React.FC = () => {
@@ -54,8 +63,10 @@ export const AITestingDashboard: React.FC = () => {
   const [jobState, setJobState] = useState<VideoAIJobState | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Table Filter
+  // Feed Filter & Table Search
+  const [feedFilter, setFeedFilter] = useState<string>('ALL');
   const [tableSearch, setTableSearch] = useState<string>('');
+  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
 
   const pollIntervalRef = useRef<number | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -82,6 +93,7 @@ export const AITestingDashboard: React.FC = () => {
       setUploadedFile(file);
       setUploadedFileName(file.name);
       setSelectedSource('upload');
+      setSnapshotResult(null);
       setErrorMsg(null);
     }
   };
@@ -216,22 +228,47 @@ export const AITestingDashboard: React.FC = () => {
     }
   };
 
+  const handleSetSpeed = (spd: number) => {
+    setPlaybackSpeed(spd);
+    if (videoPlayerRef.current) {
+      videoPlayerRef.current.playbackRate = spd;
+    }
+  };
+
+  // Compute live analytics payload
+  const analytics: ObjectAnalytics = jobState?.analytics || {
+    total_objects_tracked: snapshotResult?.total_detections || 0,
+    unique_vehicles_count: snapshotResult?.detections?.filter((d: any) => ['car', 'bus', 'truck', 'motorcycle'].includes(d.class_name.toLowerCase())).length || 0,
+    cars_count: snapshotResult?.detections?.filter((d: any) => d.class_name.toLowerCase() === 'car').length || 0,
+    buses_count: snapshotResult?.detections?.filter((d: any) => d.class_name.toLowerCase() === 'bus').length || 0,
+    trucks_count: snapshotResult?.detections?.filter((d: any) => d.class_name.toLowerCase() === 'truck').length || 0,
+    motorcycles_count: snapshotResult?.detections?.filter((d: any) => d.class_name.toLowerCase() === 'motorcycle').length || 0,
+    pedestrians_count: snapshotResult?.detections?.filter((d: any) => d.class_name.toLowerCase() === 'person').length || 0,
+    bicycles_count: snapshotResult?.detections?.filter((d: any) => d.class_name.toLowerCase() === 'bicycle').length || 0,
+    peak_frame_density: snapshotResult?.total_detections || 0,
+    avg_confidence_pct: snapshotResult?.detections?.length ? Math.round(snapshotResult.detections.reduce((acc: number, d: any) => acc + d.confidence, 0) / snapshotResult.detections.length * 100) : 0,
+    congestion_level: (snapshotResult?.total_detections || 0) >= 5 ? 'HIGH' : ((snapshotResult?.total_detections || 0) >= 2 ? 'MODERATE' : 'LOW'),
+    vehicle_distribution: {},
+  };
+
   // Filtered ANPR Results Table
-  const anprResults: ANPRTableItem[] = snapshotResult?.plates
-    ? snapshotResult.plates.map((p: any, idx: number) => ({
-        id: `snap_plate_${idx}`,
-        plate_number: p.plate_number,
-        confidence: p.confidence,
-        time_str: 'LIVE',
-        timestamp_sec: 0,
-        vehicle: p.vehicle,
-        rto_jurisdiction: p.rto_jurisdiction,
-        is_gujarat: p.is_gujarat,
-        first_seen_frame: 1,
-        last_seen_frame: 1,
-        total_sightings: 1,
-      }))
-    : (jobState?.anpr_results || []);
+  const anprResults: ANPRTableItem[] = (isProcessing || jobState)
+    ? (jobState?.anpr_results || [])
+    : (snapshotResult?.plates
+        ? snapshotResult.plates.map((p: any, idx: number) => ({
+            id: `snap_plate_${idx}`,
+            plate_number: p.plate_number,
+            confidence: p.confidence,
+            time_str: 'LIVE',
+            timestamp_sec: 0,
+            vehicle: p.vehicle,
+            rto_jurisdiction: p.rto_jurisdiction,
+            is_gujarat: p.is_gujarat,
+            first_seen_frame: 1,
+            last_seen_frame: 1,
+            total_sightings: 1,
+          }))
+        : []);
 
   const filteredPlates = anprResults.filter((p) => {
     if (!tableSearch) return true;
@@ -243,20 +280,35 @@ export const AITestingDashboard: React.FC = () => {
     );
   });
 
-  const recentDetections: DetectionEvent[] = snapshotResult?.detections
-    ? snapshotResult.detections.map((d: any, idx: number) => ({
-        id: `snap_det_${idx}`,
-        frame_idx: 1,
-        timestamp_sec: 0,
-        time_str: 'LIVE',
-        object_class: d.class_name.toUpperCase(),
-        display_name: d.class_name,
-        confidence: d.confidence,
-        bounding_box: d.bbox,
-        is_vehicle: ['car', 'bus', 'truck', 'motorcycle'].includes(d.class_name.toLowerCase()),
-        track_id: idx + 1,
-      }))
-    : (jobState?.recent_detections || []);
+  // Raw Detections List
+  const rawDetections: DetectionEvent[] = (isProcessing || jobState)
+    ? (jobState?.recent_detections || [])
+    : (snapshotResult?.detections
+        ? snapshotResult.detections.map((d: any, idx: number) => ({
+            id: `snap_det_${idx}`,
+            frame_idx: 1,
+            timestamp_sec: 0,
+            time_str: 'LIVE',
+            object_class: d.class_name.toUpperCase(),
+            display_name: d.class_name,
+            confidence: d.confidence,
+            bounding_box: d.bbox,
+            is_vehicle: ['car', 'bus', 'truck', 'motorcycle'].includes(d.class_name.toLowerCase()),
+            vehicle_type: d.class_name,
+            track_id: idx + 1,
+          }))
+        : []);
+
+  const recentDetections = rawDetections.filter((ev) => {
+    if (feedFilter === 'ALL') return true;
+    if (feedFilter === 'CARS') return ev.object_class === 'CAR' || ev.vehicle_type?.toLowerCase() === 'car';
+    if (feedFilter === 'BUSES') return ev.object_class === 'BUS' || ev.vehicle_type?.toLowerCase() === 'bus';
+    if (feedFilter === 'TRUCKS') return ev.object_class === 'TRUCK' || ev.vehicle_type?.toLowerCase() === 'truck';
+    if (feedFilter === 'MOTORCYCLES') return ev.object_class === 'MOTORCYCLE' || ev.vehicle_type?.toLowerCase() === 'motorcycle';
+    if (feedFilter === 'PERSONS') return ev.object_class === 'PERSON';
+    if (feedFilter === 'PLATES') return Boolean(ev.license_plate);
+    return true;
+  });
 
   return (
     <div
@@ -495,9 +547,9 @@ export const AITestingDashboard: React.FC = () => {
               borderLeft: '3px solid #38bdf8',
             }}
           >
-            {aiMode === 'yolo' && 'YOLO Model detects Person, Car, Motorcycle, Bus, Truck, Bicycle frame-by-frame.'}
-            {aiMode === 'anpr' && 'ANPR Model localizes license plates on vehicles, crops ROI, and runs OCR with Gujarat RTO parsing.'}
-            {aiMode === 'yolo_anpr' && 'Unified Pipeline: Executes full YOLO object detection + automatic plate OCR on all vehicles simultaneously.'}
+            {aiMode === 'yolo' && 'YOLO Model detects Person, Car, Motorcycle, Bus, Truck, Bicycle with real-time multi-object tracking.'}
+            {aiMode === 'anpr' && 'ANPR Model localizes vehicle license plates, crops ROI, and runs OCR with Gujarat RTO parsing.'}
+            {aiMode === 'yolo_anpr' && 'Unified Pipeline: Executes full YOLO multi-object tracking + automatic plate OCR on all vehicles simultaneously.'}
           </div>
         </div>
 
@@ -823,7 +875,278 @@ export const AITestingDashboard: React.FC = () => {
       </section>
 
       {/* ------------------------------------------------------------- */}
-      {/* 3. Main Center Workspace: Video Display & Detection Feed */}
+      {/* 3. Real-Time Object & Traffic Analytics Intelligence Suite */}
+      {/* ------------------------------------------------------------- */}
+      <section
+        style={{
+          backgroundColor: '#111927',
+          border: '1px solid #1e293b',
+          borderRadius: '12px',
+          padding: '20px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '16px',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <BarChart3 size={18} className="text-cyan" />
+            <div>
+              <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 800, letterSpacing: '0.5px' }}>
+                3. REAL-TIME OBJECT & TRAFFIC ANALYTICS
+              </h3>
+              <p style={{ margin: '2px 0 0', fontSize: '11px', color: '#94a3b8' }}>
+                Continuous vehicle velocity, density distribution, and classification telemetry
+              </p>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '11px', color: '#94a3b8' }}>CONGESTION LEVEL:</span>
+            <span
+              style={{
+                padding: '4px 10px',
+                borderRadius: '4px',
+                fontSize: '11px',
+                fontWeight: 800,
+                letterSpacing: '0.5px',
+                backgroundColor:
+                  analytics.congestion_level === 'HIGH'
+                    ? 'rgba(239, 68, 68, 0.2)'
+                    : analytics.congestion_level === 'MODERATE'
+                    ? 'rgba(245, 158, 11, 0.2)'
+                    : 'rgba(16, 185, 129, 0.2)',
+                color:
+                  analytics.congestion_level === 'HIGH'
+                    ? '#f87171'
+                    : analytics.congestion_level === 'MODERATE'
+                    ? '#fbbf24'
+                    : '#34d399',
+                border:
+                  analytics.congestion_level === 'HIGH'
+                    ? '1px solid #ef4444'
+                    : analytics.congestion_level === 'MODERATE'
+                    ? '1px solid #f59e0b'
+                    : '1px solid #10b981',
+              }}
+            >
+              ● {analytics.congestion_level === 'HIGH' ? 'HIGH (CONGESTED)' : analytics.congestion_level === 'MODERATE' ? 'MODERATE FLOW' : 'LOW (FREE FLOW)'}
+            </span>
+          </div>
+        </div>
+
+        {/* 4 KPI Top Cards */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px' }}>
+          {/* 1. Vehicles Tracked */}
+          <div
+            style={{
+              padding: '14px',
+              backgroundColor: '#0d1522',
+              border: '1px solid #1e293b',
+              borderRadius: '8px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '6px',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>TOTAL VEHICLES</span>
+              <Car size={16} style={{ color: '#38bdf8' }} />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+              <span style={{ fontSize: '26px', fontWeight: 800, color: '#f8fafc' }}>
+                {analytics.cars_count + analytics.buses_count + analytics.trucks_count + analytics.motorcycles_count}
+              </span>
+              <span style={{ fontSize: '11px', color: '#38bdf8', fontWeight: 700 }}>
+                ({analytics.unique_vehicles_count} Unique)
+              </span>
+            </div>
+            <span style={{ fontSize: '10px', color: '#64748b' }}>
+              {analytics.cars_count} Cars • {analytics.trucks_count} Trucks • {analytics.buses_count} Buses
+            </span>
+          </div>
+
+          {/* 2. Peak Density */}
+          <div
+            style={{
+              padding: '14px',
+              backgroundColor: '#0d1522',
+              border: '1px solid #1e293b',
+              borderRadius: '8px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '6px',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>PEAK SCENE DENSITY</span>
+              <TrendingUp size={16} style={{ color: '#10b981' }} />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+              <span style={{ fontSize: '26px', fontWeight: 800, color: '#10b981' }}>
+                {analytics.peak_frame_density}
+              </span>
+              <span style={{ fontSize: '11px', color: '#94a3b8' }}>concurrent objects</span>
+            </div>
+            <span style={{ fontSize: '10px', color: '#64748b' }}>
+              Max simultaneous detections in 1 frame
+            </span>
+          </div>
+
+          {/* 3. Model Confidence */}
+          <div
+            style={{
+              padding: '14px',
+              backgroundColor: '#0d1522',
+              border: '1px solid #1e293b',
+              borderRadius: '8px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '6px',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>AVG MODEL CONFIDENCE</span>
+              <Gauge size={16} style={{ color: '#fbbf24' }} />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+              <span style={{ fontSize: '26px', fontWeight: 800, color: '#fbbf24' }}>
+                {analytics.avg_confidence_pct}%
+              </span>
+              <span style={{ fontSize: '11px', color: '#94a3b8' }}>certainty</span>
+            </div>
+            <span style={{ fontSize: '10px', color: '#64748b' }}>
+              Mean score across YOLO inference passes
+            </span>
+          </div>
+
+          {/* 4. Number Plates Identified */}
+          <div
+            style={{
+              padding: '14px',
+              backgroundColor: '#0d1522',
+              border: '1px solid #1e293b',
+              borderRadius: '8px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '6px',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>ANPR PLATES FOUND</span>
+              <Zap size={16} style={{ color: '#c084fc' }} />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+              <span style={{ fontSize: '26px', fontWeight: 800, color: '#c084fc' }}>
+                {anprResults.length}
+              </span>
+              <span style={{ fontSize: '11px', color: '#94a3b8' }}>recognized</span>
+            </div>
+            <span style={{ fontSize: '10px', color: '#64748b' }}>
+              Gujarat RTO & Indian registration plates
+            </span>
+          </div>
+        </div>
+
+        {/* Object Classification Matrix Breakdown */}
+        <div
+          style={{
+            padding: '16px',
+            backgroundColor: '#0d1522',
+            border: '1px solid #1e293b',
+            borderRadius: '8px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '12px',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '12px', fontWeight: 700, color: '#e2e8f0', letterSpacing: '0.5px' }}>
+              VEHICLE & OBJECT CLASSIFICATION MATRIX
+            </span>
+            <span style={{ fontSize: '11px', color: '#64748b' }}>
+              {analytics.total_objects_tracked} Total Frames Detected
+            </span>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '12px' }}>
+            {/* Cars */}
+            <div style={{ backgroundColor: '#111927', padding: '10px', borderRadius: '6px', border: '1px solid #1e293b' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#10b981', fontSize: '11px', fontWeight: 700 }}>
+                <Car size={14} />
+                <span>CARS</span>
+              </div>
+              <div style={{ fontSize: '18px', fontWeight: 800, marginTop: '4px' }}>{analytics.cars_count}</div>
+              <div style={{ height: '4px', backgroundColor: '#1e293b', borderRadius: '2px', marginTop: '6px', overflow: 'hidden' }}>
+                <div style={{ width: `${analytics.total_objects_tracked ? (analytics.cars_count / analytics.total_objects_tracked) * 100 : 0}%`, height: '100%', backgroundColor: '#10b981' }} />
+              </div>
+            </div>
+
+            {/* Trucks */}
+            <div style={{ backgroundColor: '#111927', padding: '10px', borderRadius: '6px', border: '1px solid #1e293b' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#f59e0b', fontSize: '11px', fontWeight: 700 }}>
+                <Truck size={14} />
+                <span>TRUCKS</span>
+              </div>
+              <div style={{ fontSize: '18px', fontWeight: 800, marginTop: '4px' }}>{analytics.trucks_count}</div>
+              <div style={{ height: '4px', backgroundColor: '#1e293b', borderRadius: '2px', marginTop: '6px', overflow: 'hidden' }}>
+                <div style={{ width: `${analytics.total_objects_tracked ? (analytics.trucks_count / analytics.total_objects_tracked) * 100 : 0}%`, height: '100%', backgroundColor: '#f59e0b' }} />
+              </div>
+            </div>
+
+            {/* Buses */}
+            <div style={{ backgroundColor: '#111927', padding: '10px', borderRadius: '6px', border: '1px solid #1e293b' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#d97706', fontSize: '11px', fontWeight: 700 }}>
+                <Bus size={14} />
+                <span>BUSES</span>
+              </div>
+              <div style={{ fontSize: '18px', fontWeight: 800, marginTop: '4px' }}>{analytics.buses_count}</div>
+              <div style={{ height: '4px', backgroundColor: '#1e293b', borderRadius: '2px', marginTop: '6px', overflow: 'hidden' }}>
+                <div style={{ width: `${analytics.total_objects_tracked ? (analytics.buses_count / analytics.total_objects_tracked) * 100 : 0}%`, height: '100%', backgroundColor: '#d97706' }} />
+              </div>
+            </div>
+
+            {/* Motorcycles */}
+            <div style={{ backgroundColor: '#111927', padding: '10px', borderRadius: '6px', border: '1px solid #1e293b' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#c084fc', fontSize: '11px', fontWeight: 700 }}>
+                <Bike size={14} />
+                <span>2-WHEELERS</span>
+              </div>
+              <div style={{ fontSize: '18px', fontWeight: 800, marginTop: '4px' }}>{analytics.motorcycles_count}</div>
+              <div style={{ height: '4px', backgroundColor: '#1e293b', borderRadius: '2px', marginTop: '6px', overflow: 'hidden' }}>
+                <div style={{ width: `${analytics.total_objects_tracked ? (analytics.motorcycles_count / analytics.total_objects_tracked) * 100 : 0}%`, height: '100%', backgroundColor: '#c084fc' }} />
+              </div>
+            </div>
+
+            {/* Pedestrians */}
+            <div style={{ backgroundColor: '#111927', padding: '10px', borderRadius: '6px', border: '1px solid #1e293b' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#38bdf8', fontSize: '11px', fontWeight: 700 }}>
+                <User size={14} />
+                <span>PERSONS</span>
+              </div>
+              <div style={{ fontSize: '18px', fontWeight: 800, marginTop: '4px' }}>{analytics.pedestrians_count}</div>
+              <div style={{ height: '4px', backgroundColor: '#1e293b', borderRadius: '2px', marginTop: '6px', overflow: 'hidden' }}>
+                <div style={{ width: `${analytics.total_objects_tracked ? (analytics.pedestrians_count / analytics.total_objects_tracked) * 100 : 0}%`, height: '100%', backgroundColor: '#38bdf8' }} />
+              </div>
+            </div>
+
+            {/* Bicycles */}
+            <div style={{ backgroundColor: '#111927', padding: '10px', borderRadius: '6px', border: '1px solid #1e293b' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#facc15', fontSize: '11px', fontWeight: 700 }}>
+                <Activity size={14} />
+                <span>BICYCLES</span>
+              </div>
+              <div style={{ fontSize: '18px', fontWeight: 800, marginTop: '4px' }}>{analytics.bicycles_count}</div>
+              <div style={{ height: '4px', backgroundColor: '#1e293b', borderRadius: '2px', marginTop: '6px', overflow: 'hidden' }}>
+                <div style={{ width: `${analytics.total_objects_tracked ? (analytics.bicycles_count / analytics.total_objects_tracked) * 100 : 0}%`, height: '100%', backgroundColor: '#facc15' }} />
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ------------------------------------------------------------- */}
+      {/* 4. Main Center Workspace: Video Display & Detection Feed */}
       {/* ------------------------------------------------------------- */}
       <section
         style={{
@@ -848,13 +1171,13 @@ export const AITestingDashboard: React.FC = () => {
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <Eye size={16} className="text-cyan" />
               <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 700, letterSpacing: '0.5px' }}>
-                3. PROCESSED VIDEO & LIVE HUD DISPLAY
+                4. PROCESSED VIDEO & LIVE HUD DISPLAY
               </h3>
             </div>
 
             {snapshotResult ? (
               <span style={{ fontSize: '12px', color: '#10b981', fontWeight: 700 }}>
-                ✔ LIVE SNAPSHOT CAPTURED ({snapshotResult.total_detections} OBJECTS, {snapshotResult.total_plates} PLATES)
+                ✔ LIVE SNAPSHOT CAPTURED ({snapshotResult.total_detections} OBJECTS, {snapshotResult.total_plates || 0} PLATES)
               </span>
             ) : jobState && (
               <span style={{ fontSize: '12px', color: '#38bdf8', fontWeight: 700 }}>
@@ -898,14 +1221,15 @@ export const AITestingDashboard: React.FC = () => {
                 style={{ width: '100%', height: '100%', objectFit: 'contain' }}
               />
             ) : jobState?.status === 'COMPLETED' && jobState.video_url ? (
-              /* 3. Processed Video Player on completion */
+              /* 3. In-Browser HTML5 H.264 Video Player */
               <video
                 ref={videoPlayerRef}
                 src={jobState.video_url}
                 controls
                 autoPlay
                 loop
-                style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                playsInline
+                style={{ width: '100%', height: '100%', objectFit: 'contain', backgroundColor: '#000000' }}
               />
             ) : (
               /* 4. Idle Standby Screen */
@@ -921,7 +1245,7 @@ export const AITestingDashboard: React.FC = () => {
             )}
           </div>
 
-          {/* Progress Bar & Telemetry */}
+          {/* Progress Bar & Playback Controls */}
           {jobState && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
@@ -957,7 +1281,54 @@ export const AITestingDashboard: React.FC = () => {
               </div>
 
               {jobState.status === 'COMPLETED' && (
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px' }}>
+                  {/* Speed Controls */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontSize: '11px', color: '#94a3b8' }}>SPEED:</span>
+                    {[0.5, 1.0, 2.0].map((spd) => (
+                      <button
+                        key={spd}
+                        onClick={() => handleSetSpeed(spd)}
+                        style={{
+                          padding: '2px 8px',
+                          borderRadius: '4px',
+                          border: 'none',
+                          backgroundColor: playbackSpeed === spd ? '#0284c7' : '#1e293b',
+                          color: '#ffffff',
+                          fontSize: '10px',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {spd}x
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => {
+                        if (videoPlayerRef.current) {
+                          videoPlayerRef.current.currentTime = 0;
+                          videoPlayerRef.current.play();
+                        }
+                      }}
+                      style={{
+                        padding: '2px 8px',
+                        borderRadius: '4px',
+                        border: 'none',
+                        backgroundColor: '#1e293b',
+                        color: '#94a3b8',
+                        fontSize: '10px',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                      }}
+                    >
+                      <RotateCcw size={10} />
+                      <span>Replay</span>
+                    </button>
+                  </div>
+
                   <a
                     href={jobState.download_url}
                     download
@@ -992,15 +1363,15 @@ export const AITestingDashboard: React.FC = () => {
             padding: '20px',
             display: 'flex',
             flexDirection: 'column',
-            gap: '14px',
-            maxHeight: '560px',
+            gap: '12px',
+            maxHeight: '620px',
           }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <Activity size={16} className="text-cyan" />
               <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 700, letterSpacing: '0.5px' }}>
-                4. DETECTION FEED
+                5. DETECTION FEED
               </h3>
             </div>
             <span
@@ -1013,15 +1384,37 @@ export const AITestingDashboard: React.FC = () => {
                 fontWeight: 700,
               }}
             >
-              {jobState?.total_detections || 0} TOTAL
+              {recentDetections.length} DISPLAYED
             </span>
+          </div>
+
+          {/* Filter Bar */}
+          <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+            {['ALL', 'CARS', 'BUSES', 'TRUCKS', 'MOTORCYCLES', 'PERSONS', 'PLATES'].map((flt) => (
+              <button
+                key={flt}
+                onClick={() => setFeedFilter(flt)}
+                style={{
+                  padding: '3px 8px',
+                  borderRadius: '4px',
+                  border: 'none',
+                  backgroundColor: feedFilter === flt ? '#0284c7' : '#0d1522',
+                  color: feedFilter === flt ? '#ffffff' : '#94a3b8',
+                  fontSize: '10px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                {flt}
+              </button>
+            ))}
           </div>
 
           {/* Detection Events Column Header */}
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: '1.5fr 1fr 1fr',
+              gridTemplateColumns: '1.6fr 1fr 1fr',
               padding: '6px 10px',
               backgroundColor: '#0d1522',
               borderRadius: '6px',
@@ -1030,7 +1423,7 @@ export const AITestingDashboard: React.FC = () => {
               color: '#94a3b8',
             }}
           >
-            <span>DETECTION</span>
+            <span>OBJECT & TRACK</span>
             <span style={{ textAlign: 'center' }}>CONFIDENCE</span>
             <span style={{ textAlign: 'right' }}>TIMESTAMP</span>
           </div>
@@ -1055,7 +1448,7 @@ export const AITestingDashboard: React.FC = () => {
                   fontSize: '12px',
                 }}
               >
-                No live detection events yet. Start processing to stream events.
+                No live detection events match filter. Start processing to stream events.
               </div>
             ) : (
               recentDetections
@@ -1063,7 +1456,10 @@ export const AITestingDashboard: React.FC = () => {
                 .reverse()
                 .map((ev, idx) => {
                   const isPlate = Boolean(ev.license_plate && ev.object_class === ev.license_plate);
-                  const isCar = ev.object_class === 'CAR' || ev.vehicle_type === 'Car';
+                  const isCar = ev.object_class === 'CAR' || ev.vehicle_type?.toLowerCase() === 'car';
+                  const isBus = ev.object_class === 'BUS' || ev.vehicle_type?.toLowerCase() === 'bus';
+                  const isTruck = ev.object_class === 'TRUCK' || ev.vehicle_type?.toLowerCase() === 'truck';
+                  const isMotorcycle = ev.object_class === 'MOTORCYCLE' || ev.vehicle_type?.toLowerCase() === 'motorcycle';
                   const isPerson = ev.object_class === 'PERSON';
                   const confPct = Math.round(ev.confidence * 100);
 
@@ -1072,7 +1468,7 @@ export const AITestingDashboard: React.FC = () => {
                       key={`${ev.id}-${idx}`}
                       style={{
                         display: 'grid',
-                        gridTemplateColumns: '1.5fr 1fr 1fr',
+                        gridTemplateColumns: '1.6fr 1fr 1fr',
                         alignItems: 'center',
                         padding: '10px',
                         backgroundColor: '#0d1522',
@@ -1083,9 +1479,15 @@ export const AITestingDashboard: React.FC = () => {
                           ? '4px solid #ef4444'
                           : isCar
                           ? '4px solid #10b981'
+                          : isBus
+                          ? '4px solid #d97706'
+                          : isTruck
+                          ? '4px solid #f59e0b'
+                          : isMotorcycle
+                          ? '4px solid #c084fc'
                           : isPerson
                           ? '4px solid #00f0ff'
-                          : '4px solid #f59e0b',
+                          : '4px solid #38bdf8',
                       }}
                     >
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -1103,26 +1505,40 @@ export const AITestingDashboard: React.FC = () => {
                             PLATE
                           </span>
                         ) : isCar ? (
-                          <Car size={13} style={{ color: '#10b981' }} />
+                          <Car size={14} style={{ color: '#10b981' }} />
+                        ) : isBus ? (
+                          <Bus size={14} style={{ color: '#d97706' }} />
+                        ) : isTruck ? (
+                          <Truck size={14} style={{ color: '#f59e0b' }} />
+                        ) : isMotorcycle ? (
+                          <Bike size={14} style={{ color: '#c084fc' }} />
                         ) : isPerson ? (
-                          <User size={13} style={{ color: '#00f0ff' }} />
+                          <User size={14} style={{ color: '#00f0ff' }} />
                         ) : (
-                          <Shield size={13} style={{ color: '#f59e0b' }} />
+                          <Shield size={14} style={{ color: '#f59e0b' }} />
                         )}
-                        <strong
-                          style={{
-                            color: isPlate ? '#fca5a5' : '#f8fafc',
-                            fontFamily: isPlate ? "'Courier New', monospace" : 'inherit',
-                          }}
-                        >
-                          {ev.display_name || ev.object_class}
-                        </strong>
+                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                          <strong
+                            style={{
+                              color: isPlate ? '#fca5a5' : '#f8fafc',
+                              fontFamily: isPlate ? "'Courier New', monospace" : 'inherit',
+                              fontSize: '12px',
+                            }}
+                          >
+                            {ev.display_name || ev.object_class}
+                          </strong>
+                          {ev.track_id && (
+                            <span style={{ fontSize: '10px', color: '#64748b' }}>
+                              #TRK-{ev.track_id}
+                            </span>
+                          )}
+                        </div>
                       </div>
 
                       <div style={{ textAlign: 'center' }}>
                         <span
                           style={{
-                            color: confPct >= 85 ? '#34d399' : confPct >= 65 ? '#fbbf24' : '#f87171',
+                            color: confPct >= 75 ? '#34d399' : confPct >= 50 ? '#fbbf24' : '#f87171',
                             fontWeight: 700,
                           }}
                         >
@@ -1135,6 +1551,7 @@ export const AITestingDashboard: React.FC = () => {
                           textAlign: 'right',
                           color: '#94a3b8',
                           fontFamily: "'Courier New', monospace",
+                          fontSize: '11px',
                         }}
                       >
                         {ev.time_str}
@@ -1148,7 +1565,7 @@ export const AITestingDashboard: React.FC = () => {
       </section>
 
       {/* ------------------------------------------------------------- */}
-      {/* 4. Bottom Table: ANPR Results */}
+      {/* 5. Bottom Table: ANPR Results */}
       {/* ------------------------------------------------------------- */}
       <section
         style={{
@@ -1166,7 +1583,7 @@ export const AITestingDashboard: React.FC = () => {
             <Car size={18} className="text-cyan" />
             <div>
               <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 800, letterSpacing: '0.5px' }}>
-                5. ANPR RESULTS TABLE (RECOGNIZED NUMBER PLATES)
+                6. ANPR RESULTS TABLE (RECOGNIZED NUMBER PLATES)
               </h3>
               <p style={{ margin: '2px 0 0', fontSize: '11px', color: '#94a3b8' }}>
                 Identified Gujarat RTO and Indian vehicle registration plates with confidence & jurisdiction
@@ -1365,3 +1782,4 @@ export const AITestingDashboard: React.FC = () => {
     </div>
   );
 };
+
