@@ -422,16 +422,23 @@ async def start_video_processing(
 @router.get("/sample-cameras", summary="List all 30 Sentinel Gujarat CCTV cameras for testing")
 async def get_sentinel_cameras():
     """Returns the full 30 Sentinel Gujarat Police cameras for live AI testing."""
-    root_dir = Path(__file__).resolve().parent.parent.parent.parent.parent
-    cams_file = root_dir / "sentinel_cameras_full.json"
-    
+    candidates = [
+        Path("sentinel_cameras_full.json"),
+        Path.cwd() / "sentinel_cameras_full.json",
+        Path.cwd().parent / "sentinel_cameras_full.json",
+        Path(__file__).resolve().parent.parent.parent.parent.parent / "sentinel_cameras_full.json",
+        Path(__file__).resolve().parent.parent.parent.parent.parent.parent / "sentinel_cameras_full.json",
+    ]
     cams_list = []
-    if cams_file.exists():
-        try:
-            with open(cams_file, "r", encoding="utf-8") as f:
-                cams_list = json.load(f)
-        except Exception:
-            pass
+    for c in candidates:
+        if c.is_file():
+            try:
+                with open(c, "r", encoding="utf-8") as f:
+                    cams_list = json.load(f)
+                    if cams_list:
+                        break
+            except Exception:
+                pass
 
     # Enrich with RTSP, HLS, sample availability, and inferred district
     enriched = []
