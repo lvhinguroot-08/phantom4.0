@@ -1,4 +1,4 @@
-﻿/**
+/**
  * PHANTOM 2.0 AI Testing API Client
  * Interfaces with unified backend AI endpoints: /api/upload, /api/process, /api/yolo/detect, /api/anpr/recognize, /api/results/{id}
  */
@@ -187,6 +187,27 @@ export const aiTestingApi = {
       body: formData,
     });
     if (!res.ok) throw new Error("ANPR direct recognition failed.");
+    return res.json();
+  },
+
+  /**
+   * Fetch 30 real-life Sentinel Gujarat CCTV camera streams
+   */
+  async getSentinelCameras(): Promise<{ success: boolean; total: number; cameras: Array<{ id: string; name: string; district: string; rtsp_url: string; hls_url: string; webrtc_url: string; has_local_sample: boolean; sample_id: string; }> }> {
+    const res = await fetch(`${API_BASE}/api/sample-cameras`);
+    if (!res.ok) throw new Error("Failed to fetch Sentinel camera list.");
+    return res.json();
+  },
+
+  /**
+   * Capture real-time live frame from Sentinel camera and run YOLO+ANPR
+   */
+  async getCameraSnapshot(cameraId: string, confThreshold: number = 0.35) {
+    const res = await fetch(`${API_BASE}/api/camera/${cameraId}/snapshot?confidence_threshold=${confThreshold}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err?.detail || "Failed to capture live camera snapshot.");
+    }
     return res.json();
   },
 };

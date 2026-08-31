@@ -1,4 +1,4 @@
-﻿"""
+"""
 PHANTOM Unified AI API Endpoints
 Provides direct /api/upload, /api/yolo/detect, /api/anpr/recognize, /api/process,
 and /api/results/{id} endpoints matching PHANTOM 2.0 specifications.
@@ -317,7 +317,7 @@ async def direct_anpr_recognize(
 )
 async def start_video_processing(
     file: Optional[UploadFile] = File(None, description="Direct video upload"),
-    upload_id: Optional[str] = Form(None, description="Pre-uploaded video ID"),
+    upload_id: Optional[str] = Form(None, description="Pre-uploaded video ID or Camera ID"),
     mode: str = Form("yolo_anpr", description="Processing mode: yolo, anpr, yolo_anpr"),
     sample_fps: float = Form(4.0, description="Sampling FPS rate (e.g. 1.0 to 15.0)"),
     confidence_threshold: float = Form(0.35, description="Confidence threshold"),
@@ -332,17 +332,59 @@ async def start_video_processing(
             shutil.copyfileobj(file.file, buffer)
         target_path = temp_input_path
     elif upload_id:
-        if upload_id == "SAMPLE_TRAFFIC":
-            sample_path = SAMPLE_DIR / "sample_traffic_cctv.mp4"
-            if sample_path.exists():
-                # Make a copy for processing
-                temp_input_path = str(UPLOAD_TEMP_DIR / f"{uuid.uuid4()}_sample.mp4")
-                shutil.copyfile(str(sample_path), temp_input_path)
-                target_path = temp_input_path
-        else:
-            matches = list(UPLOAD_TEMP_DIR.glob(f"{upload_id}.*"))
-            if matches:
-                target_path = str(matches[0])
+        # Check if upload_id matches a Sentinel camera or preset
+        clean_id = upload_id.strip()
+        cam_sample = SAMPLE_DIR / f"{clean_id}_sample.mp4"
+        cam_real = SAMPLE_DIR / f"{clean_id}_real_cctv.mp4"
+
+        if cam_sample.exists():
+            temp_input_path = str(UPLOAD_TEMP_DIR / f"{uuid.uuid4()}_{clean_id}.mp4")
+            shutil.copyfile(str(cam_sample), temp_input_path)
+            target_path = temp_input_path
+        elif cam_real.exists():
+            temp_input_path = str(UPLOAD_TEMP_DIR / f"{uuid.uuid4()}_{clean_id}.mp4")
+            shutil.copyfile(str(cam_real), temp_input_path)
+            target_path = temp_input_path
+        elif clean_id.startswith("cam") and len(clean_id) <= 6:
+            # Capture 5 seconds live from the requested RTSP camera
+            temp_input_path = str(UPLOAD_TEMP_DIR / f"{uuid.uuid4()}_{clean_id}.mp4")
+            rtsp_url = f"rtsp://103.250.160.189:8554/stream/{clean_id}"
+            try:
+                os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+                cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
+                if cap.isOpened():
+                    fps = 25.0
+                    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 1920)
+                    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 1080)
+                    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                    out = cv2.VideoWriter(temp_input_path, fourcc, fps, (w, h))
+                    import time
+                    st = time.time()
+                    fc = 0
+                    while (time.time() - st) < 4.0 and fc < 100:
+                        ret, frame = cap.read()
+                        if not ret or frame is None:
+                            break
+                        out.write(frame)
+                        fc += 1
+                    cap.release()
+                    out.release()
+                    if fc > 10:
+                        target_path = temp_input_path
+            except Exception as cap_err:
+                logger.warning(f"Failed to capture live clip from {clean_id}: {cap_err}")
+
+        if not target_path:
+            if clean_id == "SAMPLE_TRAFFIC" or not target_path:
+                sample_path = SAMPLE_DIR / "sample_traffic_cctv.mp4"
+                if sample_path.exists():
+                    temp_input_path = str(UPLOAD_TEMP_DIR / f"{uuid.uuid4()}_sample.mp4")
+                    shutil.copyfile(str(sample_path), temp_input_path)
+                    target_path = temp_input_path
+                else:
+                    matches = list(UPLOAD_TEMP_DIR.glob(f"{upload_id}.*"))
+                    if matches:
+                        target_path = str(matches[0])
 
     if not target_path or not os.path.exists(target_path):
         raise HTTPException(
@@ -372,6 +414,135 @@ async def start_video_processing(
         status_url=f"/api/results/{job.job_id}",
         stream_url=f"/api/results/{job.job_id}/stream",
     )
+
+
+# ------------------------------------------------------------------------------
+# 5. Sentinel Cameras Directory & Live Snapshot
+# ------------------------------------------------------------------------------
+@router.get("/sample-cameras", summary="List all 30 Sentinel Gujarat CCTV cameras for testing")
+async def get_sentinel_cameras():
+    """Returns the full 30 Sentinel Gujarat Police cameras for live AI testing."""
+    root_dir = Path(__file__).resolve().parent.parent.parent.parent.parent
+    cams_file = root_dir / "sentinel_cameras_full.json"
+    
+    cams_list = []
+    if cams_file.exists():
+        try:
+            with open(cams_file, "r", encoding="utf-8") as f:
+                cams_list = json.load(f)
+        except Exception:
+            pass
+
+    # Enrich with RTSP, HLS, sample availability, and inferred district
+    enriched = []
+    for c in cams_list:
+        cid = c["id"]
+        cname = c["name"]
+        sample_file = SAMPLE_DIR / f"{cid}_sample.mp4"
+        enriched.append({
+            "id": cid,
+            "name": cname,
+            "district": "Ahmedabad" if "ahmedabad" in cname.lower() or any(k in cname.lower() for k in ["chiman", "janpath", "ongc", "paldi", "visat", "vidhyalaya", "delight", "suvidha"]) else ("Junagadh" if "junagadh" in cname.lower() or any(k in cname.lower() for k in ["timbavadi", "majewadi", "dolatpara", "char-chowk"]) else ("Gir Somnath" if "somnath" in cname.lower() else ("Rajkot" if "rajkot" in cname.lower() else ("Gandhinagar" if "adalaj" in cname.lower() or "dehgam" in cname.lower() else ("Navsari" if "bilimora" in cname.lower() or "khaparia" in cname.lower() else "Gujarat"))))),
+            "rtsp_url": f"rtsp://103.250.160.189:8554/stream/{cid}",
+            "hls_url": f"https://cctv.corp8.cloud/{cid}/index.m3u8",
+            "webrtc_url": f"http://103.250.160.189:8889/stream/{cid}/whep",
+            "has_local_sample": sample_file.exists(),
+            "sample_id": cid,
+        })
+    return {"success": True, "total": len(enriched), "cameras": enriched}
+
+
+@router.get("/camera/{camera_id}/snapshot", summary="Capture live real-time frame from Sentinel camera and run YOLO+ANPR")
+async def get_camera_live_snapshot(
+    camera_id: str,
+    confidence_threshold: float = Query(0.35),
+):
+    """Fetches a real-time live frame from the RTSP camera stream and runs instant YOLO + ANPR."""
+    clean_id = camera_id.strip().lower()
+    rtsp_url = f"rtsp://103.250.160.189:8554/stream/{clean_id}"
+
+    os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+    cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
+    
+    frame = None
+    if cap.isOpened():
+        ret, read_frame = cap.read()
+        if ret and read_frame is not None:
+            frame = read_frame
+        cap.release()
+
+    if frame is None:
+        # Fallback to local sample clip if live RTSP momentarily unreachable
+        sample_path = SAMPLE_DIR / f"{clean_id}_sample.mp4"
+        if sample_path.exists():
+            cap_sample = cv2.VideoCapture(str(sample_path))
+            if cap_sample.isOpened():
+                ret, s_frame = cap_sample.read()
+                if ret and s_frame is not None:
+                    frame = s_frame
+                cap_sample.release()
+
+    if frame is None:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Unable to capture live frame from camera {clean_id}. Upstream feed connecting...",
+        )
+
+    # Run YOLO & ANPR
+    detector = get_detector()
+    ocr_proc = build_ocr_processor()
+    raw_dets = detector.detect_frame(frame, confidence_threshold=confidence_threshold)
+
+    annotated = frame.copy()
+    h, w = annotated.shape[:2]
+    plates_found = []
+
+    for d in raw_dets:
+        bx = d["bbox"]
+        cls_name = normalize_class_name(d["class_name"])
+        conf = d["confidence"]
+        
+        cv2.rectangle(annotated, (bx["x1"], bx["y1"]), (bx["x2"], bx["y2"]), (0, 240, 255), 2)
+        cv2.putText(annotated, f"{cls_name} {int(conf*100)}%", (bx["x1"], max(18, bx["y1"] - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 240, 255), 1)
+
+        if cls_name in ("CAR", "TRUCK", "BUS", "MOTORCYCLE", "OTHER_VEHICLE"):
+            vx1, vy1, vx2, vy2 = bx["x1"], bx["y1"], bx["x2"], bx["y2"]
+            vh, vw = vy2 - vy1, vx2 - vx1
+            if vh > 20 and vw > 20:
+                px1 = max(0, int(vx1 + vw * 0.15))
+                py1 = max(0, int(vy1 + vh * 0.55))
+                px2 = min(w, int(vx2 - vw * 0.15))
+                py2 = min(h, vy2)
+                crop = frame[py1:py2, px1:px2]
+                ocr_res = ocr_proc.read_text(crop)
+                norm_p = normalize_plate_text(ocr_res.raw_text or ocr_res.normalized_text)
+                if norm_p:
+                    struct = extract_plate_structure(norm_p)
+                    plates_found.append({
+                        "plate_number": norm_p,
+                        "raw_text": ocr_res.raw_text,
+                        "confidence": round(ocr_res.confidence or 0.90, 4),
+                        "vehicle": cls_name.capitalize(),
+                        "rto_jurisdiction": struct.get("rto_jurisdiction"),
+                        "is_gujarat": struct.get("is_gujarat", False),
+                        "bounding_box": bx,
+                    })
+                    cv2.rectangle(annotated, (px1, py1), (px2, py2), (239, 68, 68), 2)
+                    cv2.putText(annotated, f"IND {norm_p}", (vx1, vy2 + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (239, 68, 68), 2)
+
+    _, jpg_buf = cv2.imencode(".jpg", annotated)
+    b64 = base64.b64encode(jpg_buf.tobytes()).decode("utf-8")
+
+    return {
+        "success": True,
+        "camera_id": clean_id,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "total_detections": len(raw_dets),
+        "total_plates": len(plates_found),
+        "detections": raw_dets,
+        "plates": plates_found,
+        "image": f"data:image/jpeg;base64,{b64}",
+    }
 
 
 # ------------------------------------------------------------------------------

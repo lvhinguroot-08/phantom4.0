@@ -31,9 +31,18 @@ import {
 export const AITestingDashboard: React.FC = () => {
   // AI Agent Mode: YOLO, ANPR, or YOLO + ANPR
   const [aiMode, setAiMode] = useState<'yolo' | 'anpr' | 'yolo_anpr'>('yolo_anpr');
-  const [selectedSource, setSelectedSource] = useState<'upload' | 'sample'>('sample');
+  const [selectedSource, setSelectedSource] = useState<'sentinel_grid' | 'sample' | 'upload'>('sentinel_grid');
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [uploadedFileName, setUploadedFileName] = useState<string>('');
+
+  // Sentinel 30 Real CCTV Cameras
+  const [sentinelCameras, setSentinelCameras] = useState<Array<{ id: string; name: string; district: string; rtsp_url: string; hls_url: string; webrtc_url: string; has_local_sample: boolean; sample_id: string; }>>([]);
+  const [selectedCameraId, setSelectedCameraId] = useState<string>('cam01');
+  const [selectedSampleClip, setSelectedSampleClip] = useState<string>('cam01_sample');
+
+  // Live Snapshot State
+  const [snapshotResult, setSnapshotResult] = useState<any | null>(null);
+  const [isTakingSnapshot, setIsTakingSnapshot] = useState<boolean>(false);
 
   // Configuration Sliders
   const [confidenceThreshold, setConfidenceThreshold] = useState<number>(0.30);
@@ -53,8 +62,14 @@ export const AITestingDashboard: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const videoPlayerRef = useRef<HTMLVideoElement | null>(null);
 
-  // Cleanup on unmount
+  // Load 30 Sentinel cameras on mount
   useEffect(() => {
+    aiTestingApi.getSentinelCameras().then((res) => {
+      if (res && res.cameras) {
+        setSentinelCameras(res.cameras);
+      }
+    }).catch(() => {});
+
     return () => {
       if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
       if (wsRef.current) wsRef.current.close();
@@ -71,10 +86,24 @@ export const AITestingDashboard: React.FC = () => {
     }
   };
 
+  const handleLiveSnapshot = async () => {
+    setErrorMsg(null);
+    setIsTakingSnapshot(true);
+    try {
+      const snap = await aiTestingApi.getCameraSnapshot(selectedCameraId, confidenceThreshold);
+      setSnapshotResult(snap);
+    } catch (err: any) {
+      setErrorMsg(err?.message || `Failed to capture live snapshot from ${selectedCameraId}`);
+    } finally {
+      setIsTakingSnapshot(false);
+    }
+  };
+
   const handleStartProcessing = async () => {
     setErrorMsg(null);
     setIsProcessing(true);
     setJobState(null);
+    setSnapshotResult(null);
 
     try {
       let res;
@@ -90,10 +119,19 @@ export const AITestingDashboard: React.FC = () => {
           sampleFps: sampleFps,
           confidenceThreshold: confidenceThreshold,
         });
-      } else {
-        // Pre-bundled sample traffic footage
+      } else if (selectedSource === 'sentinel_grid') {
+        const camObj = sentinelCameras.find((c) => c.id === selectedCameraId);
         res = await aiTestingApi.startProcessing({
-          uploadId: 'SAMPLE_TRAFFIC',
+          uploadId: selectedCameraId,
+          cameraId: camObj ? `${camObj.id} - ${camObj.name}` : selectedCameraId,
+          mode: aiMode,
+          sampleFps: sampleFps,
+          confidenceThreshold: confidenceThreshold,
+        });
+      } else {
+        res = await aiTestingApi.startProcessing({
+          uploadId: selectedSampleClip,
+          cameraId: selectedSampleClip,
           mode: aiMode,
           sampleFps: sampleFps,
           confidenceThreshold: confidenceThreshold,
@@ -179,7 +217,22 @@ export const AITestingDashboard: React.FC = () => {
   };
 
   // Filtered ANPR Results Table
-  const anprResults = jobState?.anpr_results || [];
+  const anprResults: ANPRTableItem[] = snapshotResult?.plates
+    ? snapshotResult.plates.map((p: any, idx: number) => ({
+        id: `snap_plate_${idx}`,
+        plate_number: p.plate_number,
+        confidence: p.confidence,
+        time_str: 'LIVE',
+        timestamp_sec: 0,
+        vehicle: p.vehicle,
+        rto_jurisdiction: p.rto_jurisdiction,
+        is_gujarat: p.is_gujarat,
+        first_seen_frame: 1,
+        last_seen_frame: 1,
+        total_sightings: 1,
+      }))
+    : (jobState?.anpr_results || []);
+
   const filteredPlates = anprResults.filter((p) => {
     if (!tableSearch) return true;
     const q = tableSearch.toUpperCase();
@@ -190,7 +243,20 @@ export const AITestingDashboard: React.FC = () => {
     );
   });
 
-  const recentDetections = jobState?.recent_detections || [];
+  const recentDetections: DetectionEvent[] = snapshotResult?.detections
+    ? snapshotResult.detections.map((d: any, idx: number) => ({
+        id: `snap_det_${idx}`,
+        frame_idx: 1,
+        timestamp_sec: 0,
+        time_str: 'LIVE',
+        object_class: d.class_name.toUpperCase(),
+        display_name: d.class_name,
+        confidence: d.confidence,
+        bounding_box: d.bbox,
+        is_vehicle: ['car', 'bus', 'truck', 'motorcycle'].includes(d.class_name.toLowerCase()),
+        track_id: idx + 1,
+      }))
+    : (jobState?.recent_detections || []);
 
   return (
     <div
@@ -458,7 +524,22 @@ export const AITestingDashboard: React.FC = () => {
             {/* Source Mode Toggle */}
             <div style={{ display: 'flex', gap: '6px' }}>
               <button
-                onClick={() => setSelectedSource('sample')}
+                onClick={() => { setSelectedSource('sentinel_grid'); setSnapshotResult(null); }}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: '4px',
+                  border: 'none',
+                  backgroundColor: selectedSource === 'sentinel_grid' ? '#0284c7' : '#1e293b',
+                  color: '#ffffff',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                Sentinel 30 CCTV Grid
+              </button>
+              <button
+                onClick={() => { setSelectedSource('sample'); setSnapshotResult(null); }}
                 style={{
                   padding: '4px 10px',
                   borderRadius: '4px',
@@ -470,10 +551,10 @@ export const AITestingDashboard: React.FC = () => {
                   cursor: 'pointer',
                 }}
               >
-                Sample CCTV Video
+                Captured CCTV Clips
               </button>
               <button
-                onClick={() => setSelectedSource('upload')}
+                onClick={() => { setSelectedSource('upload'); setSnapshotResult(null); }}
                 style={{
                   padding: '4px 10px',
                   borderRadius: '4px',
@@ -485,19 +566,125 @@ export const AITestingDashboard: React.FC = () => {
                   cursor: 'pointer',
                 }}
               >
-                Upload Video File
+                Upload File
               </button>
             </div>
           </div>
 
-          {/* File Input or Sample Ingest */}
-          {selectedSource === 'upload' ? (
+          {/* Source Selection Body */}
+          {selectedSource === 'sentinel_grid' ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <select
+                  value={selectedCameraId}
+                  onChange={(e) => { setSelectedCameraId(e.target.value); setSnapshotResult(null); }}
+                  style={{
+                    flex: 1,
+                    backgroundColor: '#0d1522',
+                    border: '1px solid #334155',
+                    color: '#f8fafc',
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                  }}
+                >
+                  {sentinelCameras.length > 0 ? (
+                    sentinelCameras.map((cam) => (
+                      <option key={cam.id} value={cam.id}>
+                        [{cam.id.toUpperCase()}] {cam.name} — {cam.district}
+                      </option>
+                    ))
+                  ) : (
+                    <option value="cam01">[CAM01] 01 Chiman bhai Bridge — Ahmedabad</option>
+                  )}
+                </select>
+
+                <button
+                  onClick={handleLiveSnapshot}
+                  disabled={isTakingSnapshot || isProcessing}
+                  style={{
+                    padding: '8px 16px',
+                    backgroundColor: '#0f766e',
+                    border: '1px solid #14b8a6',
+                    borderRadius: '6px',
+                    color: '#ffffff',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    opacity: isTakingSnapshot ? 0.7 : 1,
+                  }}
+                >
+                  <Activity size={14} />
+                  <span>{isTakingSnapshot ? 'CAPTURING...' : 'LIVE SNAPSHOT'}</span>
+                </button>
+              </div>
+
+              {/* Camera Details Card */}
+              {(() => {
+                const currentCam = sentinelCameras.find((c) => c.id === selectedCameraId);
+                return (
+                  <div
+                    style={{
+                      padding: '8px 12px',
+                      borderRadius: '6px',
+                      backgroundColor: '#0d1522',
+                      border: '1px solid #1e293b',
+                      fontSize: '11px',
+                      color: '#94a3b8',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      flexWrap: 'wrap',
+                      gap: '8px',
+                    }}
+                  >
+                    <span>
+                      RTSP TCP:{' '}
+                      <code style={{ color: '#38bdf8' }}>
+                        rtsp://103.250.160.189:8554/stream/{selectedCameraId}
+                      </code>
+                    </span>
+                    <span style={{ color: '#10b981', fontWeight: 700 }}>
+                      ● SENTINEL ONLINE (H.264 1080p 25 FPS)
+                    </span>
+                  </div>
+                );
+              })()}
+            </div>
+          ) : selectedSource === 'sample' ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <select
+                value={selectedSampleClip}
+                onChange={(e) => { setSelectedSampleClip(e.target.value); setSnapshotResult(null); }}
+                style={{
+                  width: '100%',
+                  backgroundColor: '#0d1522',
+                  border: '1px solid #334155',
+                  color: '#f8fafc',
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  fontSize: '13px',
+                }}
+              >
+                <option value="cam01_sample">cam01_sample.mp4 — Ahmedabad Chiman bhai Bridge (Real Footage)</option>
+                <option value="cam02_sample">cam02_sample.mp4 — Ahmedabad Janpath (Real Footage)</option>
+                <option value="cam04_sample">cam04_sample.mp4 — Ahmedabad Paldi Circle (Real Footage)</option>
+                <option value="cam06_sample">cam06_sample.mp4 — Junagadh Timbavadi Gate (Real Footage)</option>
+                <option value="cam17_sample">cam17_sample.mp4 — Rajkot Bus Port CCTV (Real Footage)</option>
+                <option value="sample_traffic_cctv">sample_traffic_cctv.mp4 — Surat Multi-Vehicle Traffic</option>
+              </select>
+            </div>
+          ) : (
             <div
               onClick={() => fileInputRef.current?.click()}
               style={{
                 border: '2px dashed #334155',
                 borderRadius: '8px',
-                padding: '16px',
+                padding: '14px',
                 textAlign: 'center',
                 backgroundColor: '#0d1522',
                 cursor: 'pointer',
@@ -523,33 +710,6 @@ export const AITestingDashboard: React.FC = () => {
                   Supports MP4, AVI, MOV, MKV, WebM
                 </p>
               </div>
-            </div>
-          ) : (
-            <div
-              style={{
-                borderRadius: '8px',
-                padding: '12px 16px',
-                backgroundColor: '#0d1522',
-                border: '1px solid #1e293b',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <FileVideo size={20} className="text-cyan" />
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: '13px' }}>
-                    sample_traffic_cctv.mp4
-                  </div>
-                  <div style={{ fontSize: '11px', color: '#64748b' }}>
-                    Gujarat Surat Junction Traffic (Bus, Cars, Pedestrians, Plate: GJ05AB1234)
-                  </div>
-                </div>
-              </div>
-              <span style={{ fontSize: '11px', color: '#10b981', fontWeight: 700 }}>
-                ● READY FOR INGEST
-              </span>
             </div>
           )}
 
@@ -692,7 +852,11 @@ export const AITestingDashboard: React.FC = () => {
               </h3>
             </div>
 
-            {jobState && (
+            {snapshotResult ? (
+              <span style={{ fontSize: '12px', color: '#10b981', fontWeight: 700 }}>
+                ✔ LIVE SNAPSHOT CAPTURED ({snapshotResult.total_detections} OBJECTS, {snapshotResult.total_plates} PLATES)
+              </span>
+            ) : jobState && (
               <span style={{ fontSize: '12px', color: '#38bdf8', fontWeight: 700 }}>
                 {jobState.status === 'PROCESSING' && (
                   <span className="animate-pulse">● LIVE INFERENCE ({jobState.progress_percent}%)</span>
@@ -719,15 +883,22 @@ export const AITestingDashboard: React.FC = () => {
               justifyContent: 'center',
             }}
           >
-            {/* 1. Live Frame Base64 during processing */}
-            {isProcessing && jobState?.latest_frame_b64 ? (
+            {/* 1. Live Snapshot Image */}
+            {snapshotResult && snapshotResult.image ? (
+              <img
+                src={snapshotResult.image}
+                alt="Live Camera Snapshot HUD"
+                style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+              />
+            ) : isProcessing && jobState?.latest_frame_b64 ? (
+              /* 2. Live Frame Base64 during processing */
               <img
                 src={jobState.latest_frame_b64}
                 alt="Live AI HUD"
                 style={{ width: '100%', height: '100%', objectFit: 'contain' }}
               />
             ) : jobState?.status === 'COMPLETED' && jobState.video_url ? (
-              /* 2. Processed Video Player on completion */
+              /* 3. Processed Video Player on completion */
               <video
                 ref={videoPlayerRef}
                 src={jobState.video_url}
@@ -737,14 +908,14 @@ export const AITestingDashboard: React.FC = () => {
                 style={{ width: '100%', height: '100%', objectFit: 'contain' }}
               />
             ) : (
-              /* 3. Idle Standby Screen */
+              /* 4. Idle Standby Screen */
               <div style={{ textAlign: 'center', color: '#64748b' }}>
                 <Video size={48} style={{ marginBottom: '12px', opacity: 0.4 }} />
                 <p style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: '#94a3b8' }}>
                   Surveillance Stream Display Standby
                 </p>
                 <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#64748b' }}>
-                  Select AI Agent and click Start Processing to view live detections
+                  Select Sentinel Camera and click Live Snapshot or Start Processing
                 </p>
               </div>
             )}

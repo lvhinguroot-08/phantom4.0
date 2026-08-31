@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Integrator Guide — Sentinel</title>
+<style>
+  :root{--bg:#0a0e14;--panel:#111823;--line:#1e2a3a;--txt:#e6edf5;--mut:#7d8da3;--accent:#3b82f6;--live:#22c55e;--card:#0d1420;--font:'DM Sans',system-ui,Segoe UI,Roboto,sans-serif}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--txt);font-family:var(--font);-webkit-font-smoothing:antialiased;min-height:100vh;display:flex;flex-direction:column;line-height:1.6}
+  header{display:flex;align-items:center;gap:16px;padding:14px 20px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:10}
+  .logo{font-weight:700;letter-spacing:.5px;font-size:16px}.logo b{color:var(--accent)}.sub{font-size:12px;color:var(--mut)}
+  nav{margin-left:auto;display:flex;gap:4px}nav a{color:var(--txt);text-decoration:none;font-size:13px;font-weight:500;padding:7px 12px;border-radius:7px;opacity:.82}nav a:hover{background:rgba(255,255,255,.07)}nav a.active{background:var(--accent);color:#fff;font-weight:600;opacity:1}
+  main{flex:1;max-width:920px;margin:0 auto;padding:24px 20px 40px;width:100%}
+  h1.title{font-size:23px;margin-bottom:4px}.lead{color:var(--mut);margin-bottom:20px;font-size:14px}
+  .banner{background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.4);border-radius:10px;padding:12px 16px;margin-bottom:18px;font-size:13.5px;color:#bcd4ff}
+  .banner b{color:#fff}
+  section{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:18px 20px;margin-bottom:14px}
+  section h3{font-size:16px;color:#8fb4ff;margin-bottom:10px;display:flex;gap:8px;align-items:baseline}
+  section h3 .n{background:var(--accent);color:#fff;font-size:12px;font-weight:700;border-radius:6px;padding:1px 8px}
+  h4{font-size:13.5px;margin:14px 0 4px;color:#cdd9f2}
+  p,li{font-size:13.5px;color:#c4d0e8}ul{margin:6px 0 6px 20px}
+  table{width:100%;border-collapse:collapse;margin:10px 0;font-size:13px}
+  th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}th{color:#8fb4ff;font-weight:600}
+  .ok{color:var(--live);font-weight:600}.lan{color:#e0a326;font-weight:600}
+  code{background:#0a0e14;border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-family:Consolas,monospace;font-size:12.5px;color:#7fd1ff}
+  pre{background:#0a0e14;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:8px;padding:12px 14px;overflow-x:auto;margin:8px 0;font-family:Consolas,monospace;font-size:12.5px;color:#d7e2f7;line-height:1.5}
+  .rule{border:1px solid var(--line);border-radius:9px;padding:11px 14px;margin:8px 0;background:#0f1826}
+  .rule.d{border-left:3px solid var(--live)}.rule.x{border-left:3px solid #ff5b5b}
+  .do{color:#7ee0a0;font-weight:700}.dont{color:#ff8a8a;font-weight:700}
+  .chk{list-style:none;margin-left:0}.chk li{padding:4px 0 4px 26px;position:relative}.chk li:before{content:"\2610";position:absolute;left:0;color:#8fb4ff}
+  footer{border-top:1px solid var(--line);padding:14px 20px;text-align:center;font-size:12px;color:#5c6b86;margin-top:12px}
+</style>
+</head>
+<body>
+  <header>
+    <div><div class="logo">SENTINEL <b>//</b> Integrator's Guide</div><div class="sub">Consuming the Sentinel Camera Grid</div></div>
+    <nav><a href="/">Live Grid</a><a href="/resource" class="active">Resources</a><a href="/auth/logout">Sign out</a></nav>
+  </header>
+  <main>
+    <h1 class="title">Consuming the Sentinel Camera Grid</h1>
+    <div class="lead">Integrator's guide for AI inference and dashboards. Each endpoint behaves like a physical camera on an operational network.</div>
+
+    <div class="banner"><b>Access model:</b> <span class="ok">HLS</span> is served over the CDN host (<code>cctv.corp8.cloud</code>, behind your access password) and works on any network. <span class="lan">RTSP &amp; WebRTC/WHEP</span> carry media over TCP/UDP that a CDN cannot proxy, so they are served <b>directly on the public static IP</b> <code>103.250.160.189</code> (or a dedicated non-proxied subdomain such as <code>stream.corp8.cloud</code>). They are reachable from anywhere the gateway ports (8554/TCP, 8889/TCP, 8189/UDP) are open — no Tailscale or device registration required.</div>
+
+    <section>
+      <h3><span class="n">1</span> What you are connecting to</h3>
+      <p>Every camera is published as a live stream. One second of video takes one second to arrive, frames carry monotonic presentation timestamps (PTS), and there is <b>no seeking and no way to run ahead of real time</b>. Treat each endpoint as a physical camera.</p>
+      <table><tr><th>Protocol</th><th>Endpoint</th><th>Reachable via</th><th>Intended for</th></tr>
+        <tr><td>HLS</td><td><code>https://cctv.corp8.cloud/&lt;id&gt;/index.m3u8</code></td><td class="ok">Public (password)</td><td>Dashboards, mobile, restricted networks, remote AI</td></tr>
+        <tr><td>RTSP</td><td><code>rtsp://103.250.160.189:8554/stream/&lt;id&gt;</code></td><td class="lan">Public IP (direct)</td><td>AI inference (OpenCV, GStreamer, FFmpeg, DeepStream)</td></tr>
+        <tr><td>WebRTC (WHEP)</td><td><code>http://103.250.160.189:8889/stream/&lt;id&gt;/whep</code></td><td class="lan">Public IP (direct)</td><td>Low-latency browser preview</td></tr></table>
+      <p><code>&lt;id&gt;</code> is the camera id (<code>cam01</code> … <code>cam30</code>). Start from the catalogue rather than hard-coding — the camera set can change:</p>
+      <pre>curl -s https://cctv.corp8.cloud/cameras.json</pre>
+    </section>
+
+    <section>
+      <h3><span class="n">2</span> Connecting</h3>
+      <h4>OpenCV (Python) — HLS (remote) or RTSP (on-network)</h4>
+      <pre>import os, cv2
+# HLS (works anywhere with your session):
+cap = cv2.VideoCapture("https://cctv.corp8.cloud/cam04/index.m3u8", cv2.CAP_FFMPEG)
+# RTSP (on LAN/Tailscale — force TCP):
+os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+cap = cv2.VideoCapture("rtsp://103.250.160.189:8554/stream/cam04", cv2.CAP_FFMPEG)
+while True:
+    ok, frame = cap.read()
+    if not ok: break            # reconnect — see §3
+    pts_ms = cap.get(cv2.CAP_PROP_POS_MSEC)</pre>
+      <h4>GStreamer (RTSP)</h4>
+      <pre>gst-launch-1.0 rtspsrc location=rtsp://103.250.160.189:8554/stream/cam04 protocols=tcp latency=200 \
+  ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! fakesink</pre>
+      <h4>FFmpeg / ffprobe</h4>
+      <pre>ffplay -rtsp_transport tcp rtsp://103.250.160.189:8554/stream/cam04
+ffplay https://cctv.corp8.cloud/cam04/index.m3u8</pre>
+    </section>
+
+    <section>
+      <h3><span class="n">3</span> Do's and don'ts</h3>
+      <div class="rule d"><span class="do">DO — Force RTSP over TCP.</span> UDP fails across NAT/firewalls and produces corrupt frames that look like model bugs. Set <code>rtsp_transport=tcp</code>. If 8554 is blocked, use the HLS endpoint.</div>
+      <div class="rule x"><span class="dont">DON'T — Trust the reported frame rate.</span> <code>CAP_PROP_FPS</code> often mismatches real delivery. Use timestamps for any speed/dwell/time metric.</div>
+      <div class="rule d"><span class="do">DO — Drive timing from PTS, never arrival time.</span> On connect, a buffered GOP replays so the first second can arrive faster than real time. Feed trackers PTS deltas.</div>
+      <div class="rule x"><span class="dont">DON'T — Assume a constant frame rate.</span> Inter-frame gaps are normal; tolerate them without treating them as a disconnect.</div>
+      <div class="rule d"><span class="do">DO — Reconnect with backoff.</span> Feeds are supervised and may restart. Exponential backoff (~2s → cap ~30s). Never tight-loop.</div>
+      <div class="rule x"><span class="dont">DON'T — Treat join-time decode warnings as fatal.</span> Mixed H.264/H.265 may log <code>Could not find ref with POC</code> until the first IDR. Normal, self-corrects.</div>
+      <div class="rule d"><span class="do">DO — Expect a scene discontinuity.</span> Each feed loops; at the loop point the scene cuts abruptly. Long-lived state must recover from a hard cut.</div>
+      <div class="rule x"><span class="dont">DON'T — Plan on downloading footage.</span> There is no file download; the grid is consumed live. Build against a live capture from the start.</div>
+      <div class="rule d"><span class="do">DO — Pace your load.</span> Each client gets its own stream copy. Open only the cameras you are processing; close captures you finish with.</div>
+    </section>
+
+    <section>
+      <h3><span class="n">4</span> Pre-submission checklist</h3>
+      <ul class="chk">
+        <li>RTSP clients force TCP; remote clients use HLS.</li>
+        <li>No timing logic depends on <code>CAP_PROP_FPS</code> or frame arrival time.</li>
+        <li>Inter-frame gaps do not crash or stall the pipeline.</li>
+        <li>Reconnect with backoff is implemented and tested.</li>
+        <li>Decoder warnings on join are logged, not fatal.</li>
+        <li>Camera list read from <code>cameras.json</code>; mixed H.264/H.265 and resolutions handled.</li>
+        <li>Behaviour is sane across a scene discontinuity (loop point).</li>
+      </ul>
+    </section>
+
+    <section>
+      <h3><span class="n">5</span> Support</h3>
+      <p>Report feed problems with the camera id, exact URL, your client + version, UTC timestamp, and the client-side error log. Confirm the camera's status on the live grid before reporting it down.</p>
+    </section>
+  </main>
+  <footer>Sentinel Camera Grid · Integrator resources · authorised access only</footer>
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v3d52b47920f24c319d37e2661827c42b1787588026925" integrity="sha512-d9sL6GJLXn6fInD1+TVXhTcQOsmxeHfmHAvwGDIxp5TO+uo1fiWW7mHomMj4MLRlCsJDTqXzWLHJFFlPCEIj/A==" data-cf-beacon='{"version":"2024.11.0","token":"aa0a62daf19c4ffeb408f019e8c45790","r":1}' crossorigin="anonymous"></script>
+</body>
+</html>
