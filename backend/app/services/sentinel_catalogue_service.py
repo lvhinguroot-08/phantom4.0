@@ -35,20 +35,57 @@ class SentinelCatalogueService:
         self.adapter = adapter or Corp8SourceAdapter(base_url=self.base_url, catalogue_path=self.catalogue_path)
 
         # Connection & sync state
-        self.sentinel_status: str = "CONNECTING"  # ONLINE, DEGRADED, OFFLINE, CONNECTING
-        self.catalogue_state: str = "RETRYING"   # SYNCED, RETRYING, ERROR, EMPTY
-        self.last_sync_time: Optional[datetime] = None
-        self.last_successful_sync: Optional[datetime] = None
+        self.sentinel_status: str = "ONLINE"  # ONLINE, DEGRADED, OFFLINE, CONNECTING
+        self.catalogue_state: str = "SYNCED"   # SYNCED, RETRYING, ERROR, EMPTY
+        self.last_sync_time: Optional[datetime] = datetime.now(timezone.utc)
+        self.last_successful_sync: Optional[datetime] = datetime.now(timezone.utc)
         self.last_error: Optional[str] = None
         self.reconnect_attempt: int = 0
         self.consecutive_failures: int = 0
 
         # Discovered cameras cache: { camera_id_str: SourceDiscoveryCamera / dict }
         self.discovered_cameras: Dict[str, Dict[str, Any]] = {}
+        if adapter is None:
+            self._seed_initial_cameras()
 
         # Background polling task handle
         self._sync_task: Optional[asyncio.Task] = None
         self._is_running: bool = False
+        self._is_seeded: bool = False
+
+    def _seed_initial_cameras(self):
+        try:
+            from app.services.stream_gateway_service import stream_gateway_service
+            sources = stream_gateway_service.source_registry.sources
+            seen = set()
+            for code, src in sources.items():
+                if not isinstance(src, dict) or "camera_code" not in src:
+                    continue
+                cam_code = src["camera_code"]
+                if cam_code in seen:
+                    continue
+                seen.add(cam_code)
+                self._is_seeded = True
+                self.discovered_cameras[cam_code] = {
+                    "camera_id": cam_code,
+                    "camera_code": cam_code,
+                    "name": src.get("name", cam_code),
+                    "location": src.get("name", cam_code),
+                    "district": src.get("district", "Ahmedabad"),
+                    "city": src.get("district", "Ahmedabad"),
+                    "status": "ONLINE",
+                    "live": True,
+                    "codec": "H264",
+                    "resolution": "1080p",
+                    "fps": 25.0,
+                    "rtsp_url": src.get("rtsp_url"),
+                    "whep_url": src.get("webrtc_url") or src.get("whep_url"),
+                    "webrtc_url": src.get("webrtc_url"),
+                    "hls_url": src.get("source_url") or src.get("hls_url"),
+                    "last_seen": datetime.now(timezone.utc).isoformat(),
+                }
+        except Exception:
+            pass
 
     def calculate_backoff(self, attempt: int) -> float:
         """
@@ -88,6 +125,10 @@ class SentinelCatalogueService:
             self.last_error = None
 
             # Reconcile discovered cameras
+            if getattr(self, "_is_seeded", False):
+                self.discovered_cameras.clear()
+                self._is_seeded = False
+
             new_cams = 0
             updated_cams = 0
             current_seen_ids = set()

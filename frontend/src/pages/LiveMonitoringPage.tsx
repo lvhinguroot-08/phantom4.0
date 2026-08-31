@@ -25,7 +25,7 @@ import {
 
 export const LiveMonitoringPage: React.FC = () => {
   const [cameras, setCameras] = useState<Camera[]>([]);
-  const [layout, setLayout] = useState<'1' | '4' | '9' | '16' | '30'>('4');
+  const [layout, setLayout] = useState<'1' | '4' | '9' | '16' | '30'>('30');
   const [filterDistrict, setFilterDistrict] = useState<string>('ALL');
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [selectedCamera, setSelectedCamera] = useState<Camera | null>(null);

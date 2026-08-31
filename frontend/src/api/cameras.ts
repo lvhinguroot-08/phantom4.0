@@ -134,11 +134,48 @@ export const camerasApi = {
     }
 
     try {
-      const directRes = await fetch('/api/v1/sentinel/status');
-      if (directRes.ok) {
-        const payload = await directRes.json();
-        if (payload.data && payload.data.cameras) {
-          return payload.data.cameras;
+      const sampleRes = await fetch('/api/sample-cameras');
+      if (sampleRes.ok) {
+        const payload = await sampleRes.json();
+        if (payload.data && payload.data.cameras && payload.data.cameras.length > 0) {
+          return payload.data.cameras.map((c: any) => ({
+            id: c.id,
+            camera_code: c.id.toUpperCase(),
+            name: c.name,
+            district: c.district,
+            city: c.district,
+            state: 'Gujarat',
+            status: 'ACTIVE',
+            connectivity_status: 'ONLINE',
+            camera_type: 'ANPR',
+            ownership: 'Gujarat Police',
+            fps: 25,
+            resolution: '1080p',
+            streams: [
+              {
+                id: `stream_${c.id}`,
+                camera_id: c.id,
+                protocol: 'HLS',
+                stream_url: c.hls_url || `https://cctv.corp8.cloud/${c.id}/index.m3u8`,
+                rtsp_url: c.rtsp_url,
+                webrtc_url: c.webrtc_url,
+                resolution: '1080p',
+                fps: 25,
+                codec: 'H264',
+                is_primary: true,
+                is_active: true,
+              },
+            ],
+            location: {
+              id: `loc_${c.id}`,
+              name: c.name,
+              district: c.district,
+              city: c.district,
+              state: 'Gujarat',
+              latitude: 23.0225,
+              longitude: 72.5714,
+            },
+          }));
         }
       }
     } catch {

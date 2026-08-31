@@ -1,0 +1,333 @@
+version: '2.0'
+default_stream_mode: AUTO
+cameras:
+- camera_code: cam01
+  name: 01 Chiman bhai Bridge
+  district: Ahmedabad
+  department: Ahmedabad City Police
+  source_type: CORP8
+  source_id: cam01
+  source_url: https://cctv.corp8.cloud/cam01/index.m3u8
+  rtsp_url: rtsp://103.250.160.189:8554/stream/cam01
+  webrtc_url: http://103.250.160.189:8889/stream/cam01/whep
+  enabled: true
+  auth_required: false
+- camera_code: cam02
+  name: 02 Janpath
+  district: Ahmedabad
+  department: Ahmedabad City Police
+  source_type: CORP8
+  source_id: cam02
+  source_url: https://cctv.corp8.cloud/cam02/index.m3u8
+  rtsp_url: rtsp://103.250.160.189:8554/stream/cam02
+  webrtc_url: http://103.250.160.189:8889/stream/cam02/whep
+  enabled: true
+  auth_required: false
+- camera_code: cam03
+  name: 03 O.N.G.C. Office
+  district: Ahmedabad
+  department: Ahmedabad City Police
+  source_type: CORP8
+  source_id: cam03
+  source_url: https://cctv.corp8.cloud/cam03/index.m3u8
+  rtsp_url: rtsp://103.250.160.189:8554/stream/cam03
+  webrtc_url: http://103.250.160.189:8889/stream/cam03/whep
+  enabled: true
+  auth_required: false
+- camera_code: cam04
+  name: 04 Paldi Circle
+  district: Ahmedabad
+  department: Ahmedabad City Police
+  source_type: CORP8
+  source_id: cam04
+  source_url: https://cctv.corp8.cloud/cam04/index.m3u8
+  rtsp_url: rtsp://103.250.160.189:8554/stream/cam04
+  webrtc_url: http://103.250.160.189:8889/stream/cam04/whep
+  enabled: true
+  auth_required: false
+- camera_code: cam05
+  name: 05 Visat teen Rasta
+  district: Ahmedabad
+  department: Ahmedabad City Police
+  source_type: CORP8
+  source_id: cam05
+  source_url: https://cctv.corp8.cloud/cam05/index.m3u8
+  rtsp_url: rtsp://103.250.160.189:8554/stream/cam05
+  webrtc_url: http://103.250.160.189:8889/stream/cam05/whep
+  enabled: true
+  auth_required: false
+- camera_code: cam06
+  name: 06 Timbavadi gate-Junagadh
+  district: Junagadh
+  department: Junagadh District Police
+  source_type: CORP8
+  source_id: cam06
+  source_url: https://cctv.corp8.cloud/cam06/index.m3u8
+  rtsp_url: rtsp://103.250.160.189:8554/stream/cam06
+  webrtc_url: http://103.250.160.189:8889/stream/cam06/whep
+  enabled: true
+  auth_required: false
+- camera_code: cam07
+  name: 07 hero-showroom-gir-somnath
+  district: Gir Somnath
+  department: Gir Somnath Police
+  source_type: CORP8
+  source_id: cam07
+  source_url: https://cctv.corp8.cloud/cam07/index.m3u8
+  rtsp_url: rtsp://103.250.160.189:8554/stream/cam07
+  webrtc_url: http://103.250.160.189:8889/stream/cam07/whep
+  enabled: true
+  auth_required: false
+- camera_code: cam08
+  name: 08 majewadi-gate-junagadh
+  district: Junagadh
+  department: Junagadh District Police
+  source_type: CORP8
+  source_id: cam08
+  source_url: https://cctv.corp8.cloud/cam08/index.m3u8
+  rtsp_url: rtsp://103.250.160.189:8554/stream/cam08
+  webrtc_url: http://103.250.160.189:8889/stream/cam08/whep
+  enabled: true
+  auth_required: false
+- camera_code: cam09
+  name: 09 new-bypass-near-by-circle-junagadh-2
+  district: Junagadh
+  department: Junagadh District Police
+  source_type: CORP8
+  source_id: cam09
+  source_url: https://cctv.corp8.cloud/cam09/index.m3u8
+  rtsp_url: rtsp://103.250.160.189:8554/stream/cam09
+  webrtc_url: http://103.250.160.189:8889/stream/cam09/whep
+  enabled: true
+  auth_required: false
+- camera_code: cam10
+  name: 10 char-chowk-road-2-junagadh
+  district: Junagadh
+  department: Junagadh District Police
+  source_type: CORP8
+  source_id: cam10
+  source_url: https://cctv.corp8.cloud/cam10/index.m3u8
+  rtsp_url: rtsp://103.250.160.189:8554/stream/cam10
+  webrtc_url: http://103.250.160.189:8889/stream/cam10/whep
+  enabled: true
+  auth_required: false
+- camera_code: cam11
+  name: 11 dolatpara-junagadh
+  district: Junagadh
+  department: Junagadh District Police
+  source_type: CORP8
+  source_id: cam11
+  source_url: https://cctv.corp8.cloud/cam11/index.m3u8
+  rtsp_url: rtsp://103.250.160.189:8554/stream/cam11
+  webrtc_url: http://103.250.160.189:8889/stream/cam11/whep
+  enabled: true
+  auth_required: false
+- camera_code: cam12
+  name: 12 Tri Mandir Adalaj Tollnaka
+  district: Gandhinagar
+  department: Gandhinagar Police
+  source_type: CORP8
+  source_id: cam12
+  source_url: https://cctv.corp8.cloud/cam12/index.m3u8
+  rtsp_url: rtsp://103.250.160.189:8554/stream/cam12
+  webrtc_url: http://103.250.160.189:8889/stream/cam12/whep
+  enabled: true
+  auth_required: false
+- camera_code: cam13
+  name: 13 CN Vidhyalaya
+  district: Ahmedabad
+  department: Ahmedabad City Police
+  source_type: CORP8
+  source_id: cam13
+  source_url: https://cctv.corp8.cloud/cam13/index.m3u8
+  rtsp_url: rtsp://103.250.160.189:8554/stream/cam13
+  webrtc_url: http://103.250.160.189:8889/stream/cam13/whep
+  enabled: true
+  auth_required: false
+- camera_code: cam14
+  name: 14 Delight RLVD
+  district: Ahmedabad
+  department: Ahmedabad City Police
+  source_type: CORP8
+  source_id: cam14
+  source_url: https://cctv.corp8.cloud/cam14/index.m3u8
+  rtsp_url: rtsp://103.250.160.189:8554/stream/cam14
+  webrtc_url: http://103.250.160.189:8889/stream/cam14/whep
+  enabled: true
+  auth_required: false
+- camera_code: cam15
+  name: 15 Suvidha park
+  district: Ahmedabad
+  department: Ahmedabad City Police
+  source_type: CORP8
+  source_id: cam15
+  source_url: https://cctv.corp8.cloud/cam15/index.m3u8
+  rtsp_url: rtsp://103.250.160.189:8554/stream/cam15
+  webrtc_url: http://103.250.160.189:8889/stream/cam15/whep
+  enabled: true
+  auth_required: false
+- camera_code: cam16
+  name: 16 Visat P2
+  district: Ahmedabad
+  department: Ahmedabad City Police
+  source_type: CORP8
+  source_id: cam16
+  source_url: https://cctv.corp8.cloud/cam16/index.m3u8
+  rtsp_url: rtsp://103.250.160.189:8554/stream/cam16
+  webrtc_url: http://103.250.160.189:8889/stream/cam16/whep
+  enabled: true
+  auth_required: false
+- camera_code: cam17
+  name: 17 Rajkot Bus Port CCTV
+  district: Rajkot
+  department: Rajkot City Police
+  source_type: CORP8
+  source_id: cam17
+  source_url: https://cctv.corp8.cloud/cam17/index.m3u8
+  rtsp_url: rtsp://103.250.160.189:8554/stream/cam17
+  webrtc_url: http://103.250.160.189:8889/stream/cam17/whep
+  enabled: true
+  auth_required: false
+- camera_code: cam18
+  name: 18 Rajkot CCTV
+  district: Rajkot
+  department: Rajkot City Police
+  source_type: CORP8
+  source_id: cam18
+  source_url: https://cctv.corp8.cloud/cam18/index.m3u8
+  rtsp_url: rtsp://103.250.160.189:8554/stream/cam18
+  webrtc_url: http://103.250.160.189:8889/stream/cam18/whep
+  enabled: true
+  auth_required: false
+- camera_code: cam19
+  name: 19 KHAPARIA GRAM PANCHAYAT , TALUKA GANDEVI, DISTRICT NAVSARI
+  district: Navsari
+  department: Navsari District Police
+  source_type: CORP8
+  source_id: cam19
+  source_url: https://cctv.corp8.cloud/cam19/index.m3u8
+  rtsp_url: rtsp://103.250.160.189:8554/stream/cam19
+  webrtc_url: http://103.250.160.189:8889/stream/cam19/whep
+  enabled: true
+  auth_required: false
+- camera_code: cam20
+  name: 20 Mohanpura
+  district: Ahmedabad
+  department: Ahmedabad City Police
+  source_type: CORP8
+  source_id: cam20
+  source_url: https://cctv.corp8.cloud/cam20/index.m3u8
+  rtsp_url: rtsp://103.250.160.189:8554/stream/cam20
+  webrtc_url: http://103.250.160.189:8889/stream/cam20/whep
+  enabled: true
+  auth_required: false
+- camera_code: cam21
+  name: 23 Patan Dethali Char Rasta
+  district: Patan
+  department: Patan District Police
+  source_type: CORP8
+  source_id: cam21
+  source_url: https://cctv.corp8.cloud/cam21/index.m3u8
+  rtsp_url: rtsp://103.250.160.189:8554/stream/cam21
+  webrtc_url: http://103.250.160.189:8889/stream/cam21/whep
+  enabled: true
+  auth_required: false
+- camera_code: cam22
+  name: 28 BK Mervada tran Rasta
+  district: Morbi
+  department: Morbi District Police
+  source_type: CORP8
+  source_id: cam22
+  source_url: https://cctv.corp8.cloud/cam22/index.m3u8
+  rtsp_url: rtsp://103.250.160.189:8554/stream/cam22
+  webrtc_url: http://103.250.160.189:8889/stream/cam22/whep
+  enabled: true
+  auth_required: false
+- camera_code: cam23
+  name: 30 kheram
+  district: Kheda
+  department: Kheda District Police
+  source_type: CORP8
+  source_id: cam23
+  source_url: https://cctv.corp8.cloud/cam23/index.m3u8
+  rtsp_url: rtsp://103.250.160.189:8554/stream/cam23
+  webrtc_url: http://103.250.160.189:8889/stream/cam23/whep
+  enabled: true
+  auth_required: false
+- camera_code: cam24
+  name: 33 dehgam
+  district: Gandhinagar
+  department: Gandhinagar Police
+  source_type: CORP8
+  source_id: cam24
+  source_url: https://cctv.corp8.cloud/cam24/index.m3u8
+  rtsp_url: rtsp://103.250.160.189:8554/stream/cam24
+  webrtc_url: http://103.250.160.189:8889/stream/cam24/whep
+  enabled: true
+  auth_required: false
+- camera_code: cam25
+  name: 34 dhanori
+  district: Surat
+  department: Surat City Police
+  source_type: CORP8
+  source_id: cam25
+  source_url: https://cctv.corp8.cloud/cam25/index.m3u8
+  rtsp_url: rtsp://103.250.160.189:8554/stream/cam25
+  webrtc_url: http://103.250.160.189:8889/stream/cam25/whep
+  enabled: true
+  auth_required: false
+- camera_code: cam26
+  name: 35 TANKAL
+  district: Narmada
+  department: Narmada District Police
+  source_type: CORP8
+  source_id: cam26
+  source_url: https://cctv.corp8.cloud/cam26/index.m3u8
+  rtsp_url: rtsp://103.250.160.189:8554/stream/cam26
+  webrtc_url: http://103.250.160.189:8889/stream/cam26/whep
+  enabled: true
+  auth_required: false
+- camera_code: cam27
+  name: 36 bilimora
+  district: Navsari
+  department: Navsari District Police
+  source_type: CORP8
+  source_id: cam27
+  source_url: https://cctv.corp8.cloud/cam27/index.m3u8
+  rtsp_url: rtsp://103.250.160.189:8554/stream/cam27
+  webrtc_url: http://103.250.160.189:8889/stream/cam27/whep
+  enabled: true
+  auth_required: false
+- camera_code: cam28
+  name: 37 bilimora
+  district: Navsari
+  department: Navsari District Police
+  source_type: CORP8
+  source_id: cam28
+  source_url: https://cctv.corp8.cloud/cam28/index.m3u8
+  rtsp_url: rtsp://103.250.160.189:8554/stream/cam28
+  webrtc_url: http://103.250.160.189:8889/stream/cam28/whep
+  enabled: true
+  auth_required: false
+- camera_code: cam29
+  name: 38 bilimora
+  district: Navsari
+  department: Navsari District Police
+  source_type: CORP8
+  source_id: cam29
+  source_url: https://cctv.corp8.cloud/cam29/index.m3u8
+  rtsp_url: rtsp://103.250.160.189:8554/stream/cam29
+  webrtc_url: http://103.250.160.189:8889/stream/cam29/whep
+  enabled: true
+  auth_required: false
+- camera_code: cam30
+  name: Gandhidham Rambaugh p2
+  district: Kutch
+  department: Kutch East Police
+  source_type: CORP8
+  source_id: cam30
+  source_url: https://cctv.corp8.cloud/cam30/index.m3u8
+  rtsp_url: rtsp://103.250.160.189:8554/stream/cam30
+  webrtc_url: http://103.250.160.189:8889/stream/cam30/whep
+  enabled: true
+  auth_required: false

@@ -75,7 +75,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       title: 'COMMAND',
       items: [
         { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-        { id: 'live_monitoring', label: 'Live Monitoring', icon: Tv, badge: '4-WALL', badgeType: 'live' },
+        { id: 'live_monitoring', label: 'Live Monitoring', icon: Tv, badge: '30-LIVE', badgeType: 'live' },
         { id: 'camera_registry', label: 'Camera Registry', icon: Camera },
       ],
     },

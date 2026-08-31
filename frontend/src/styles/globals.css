@@ -2244,7 +2244,26 @@ html, body {
 }
 
 .grid-layout-30 {
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(6, 1fr);
+  gap: 8px;
+}
+
+@media (max-width: 1800px) {
+  .grid-layout-30 {
+    grid-template-columns: repeat(5, 1fr);
+  }
+}
+
+@media (max-width: 1400px) {
+  .grid-layout-30 {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+@media (max-width: 1000px) {
+  .grid-layout-30 {
+    grid-template-columns: repeat(3, 1fr);
+  }
 }
 
 .district-filter-select {

@@ -141,10 +141,12 @@ class CameraSourceRegistry:
         self.load_sources()
 
     def load_sources(self):
-        # Search candidate paths for static seed definitions if present
         candidates = [
             Path(settings.CAMERA_SOURCES_FILE),
+            Path.cwd() / "camera_sources.yaml",
+            Path.cwd().parent / "camera_sources.yaml",
             Path(__file__).resolve().parent.parent.parent / "camera_sources.yaml",
+            Path(__file__).resolve().parent.parent.parent.parent / "camera_sources.yaml",
             Path("/app/camera_sources.yaml"),
         ]
 
@@ -163,30 +165,32 @@ class CameraSourceRegistry:
                 logger.warning(f"Failed to parse camera_sources.yaml at {found_path}: {ex}")
 
     def _parse_yaml_content(self, text: str):
-        camera_blocks = text.split("- camera_code:")
-        for block in camera_blocks[1:]:
-            lines = ("camera_code:" + block).splitlines()
-            item = {}
-            for line in lines:
-                line = line.strip()
-                if not line or line.startswith("#"):
+        try:
+            import yaml
+            data = yaml.safe_load(text)
+            raw_cams = []
+            if isinstance(data, dict):
+                raw_cams = data.get("cameras", [])
+            elif isinstance(data, list):
+                raw_cams = data
+
+            for item in raw_cams:
+                if not isinstance(item, dict):
                     continue
-                if ":" in line:
-                    k, v = line.split(":", 1)
-                    k = k.strip()
-                    v = v.strip().strip('"').strip("'")
-                    if v.lower() == "true":
-                        item[k] = True
-                    elif v.lower() == "false":
-                        item[k] = False
-                    else:
-                        item[k] = v
-            if "camera_code" in item:
-                self.sources[item["camera_code"]] = item
-                code_digits = re.sub(r"\D", "", item["camera_code"])
+                code = str(item.get("camera_code") or item.get("id") or "").strip()
+                if not code:
+                    continue
+                item["camera_code"] = code
+                self.sources[code] = item
+                self.sources[code.lower()] = item
+                self.sources[code.upper()] = item
+                code_digits = re.sub(r"\D", "", code)
                 if code_digits:
                     self.sources[f"CAM-{code_digits.zfill(3)}"] = item
+                    self.sources[f"cam{code_digits.zfill(2)}"] = item
                     self.sources[str(int(code_digits))] = item
+        except Exception as ex:
+            logger.warning(f"Error parsing YAML content: {ex}")
 
     def get_source(self, camera_id: str) -> Optional[Dict[str, Any]]:
         clean_id = str(camera_id).strip()

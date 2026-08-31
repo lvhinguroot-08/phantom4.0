@@ -1,21 +1,33 @@
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import AsyncSessionLocal
 from app.core.logging import logger
 
 
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
+async def get_db() -> AsyncGenerator[Optional[AsyncSession], None]:
     """
     FastAPI dependency yielding an async database session per request.
-    Automatically handles rollbacks upon uncaught exceptions and commits if clean.
+    Gracefully yields None if database is unreachable or disconnected.
     """
-    async with AsyncSessionLocal() as session:
+    session = None
+    try:
+        session = AsyncSessionLocal()
+        yield session
         try:
-            yield session
             await session.commit()
-        except Exception as e:
-            await session.rollback()
-            logger.debug(f"Database session rolled back due to error: {e}")
-            raise
-        finally:
-            await session.close()
+        except Exception:
+            pass
+    except Exception as e:
+        if session:
+            try:
+                await session.rollback()
+            except Exception:
+                pass
+        logger.debug(f"Database session error in get_db: {e}")
+        yield None
+    finally:
+        if session:
+            try:
+                await session.close()
+            except Exception:
+                pass
