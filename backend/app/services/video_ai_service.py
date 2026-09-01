@@ -143,10 +143,7 @@ def compute_image_sharpness(img: np.ndarray) -> float:
 
 def extract_candidate_plate_rois(frame_bgr: np.ndarray, vehicle_box: Dict[str, float], vehicle_class: str = "CAR") -> List[np.ndarray]:
     """
-    Extracts multiple candidate plate regions tailored for specific vehicle geometry:
-    - Cars/SUVs: lower-third bumper [55%-96%]
-    - Trucks/Buses: chassis lower-center [60%-98%]
-    - Motorcycles/Scooters/Auto-Rickshaws: central lower [45%-95%]
+    Extracts the single optimal bumper/fender plate region tailored for vehicle geometry.
     """
     h, w = frame_bgr.shape[:2]
     vx1 = max(0, int(vehicle_box.get("x1", 0)))
@@ -156,31 +153,16 @@ def extract_candidate_plate_rois(frame_bgr: np.ndarray, vehicle_box: Dict[str, f
 
     vh = vy2 - vy1
     vw = vx2 - vx1
-    if vh < 18 or vw < 18:
+    if vh < 16 or vw < 16:
         return []
 
-    candidates: List[np.ndarray] = []
-    cls_upper = str(vehicle_class).upper()
-
-    # 1. Standard Lower Bumper Zone (Cars, SUVs, Vans)
-    by1 = max(0, int(vy1 + vh * 0.45))
+    # High-yield lower bumper crop
+    by1 = max(0, int(vy1 + vh * 0.46))
     bx1 = max(0, int(vx1 + vw * 0.08))
     bx2 = min(w, int(vx2 - vw * 0.08))
     if by1 < vy2 and bx1 < bx2:
-        candidates.append(frame_bgr[by1:vy2, bx1:bx2])
-
-    # 2. Central Lower Third (Auto-Rickshaws, Bikes, Tight Plates)
-    cy1 = max(0, int(vy1 + vh * 0.55))
-    cx1 = max(0, int(vx1 + vw * 0.18))
-    cx2 = min(w, int(vx2 - vw * 0.18))
-    if cy1 < vy2 and cx1 < cx2:
-        candidates.append(frame_bgr[cy1:vy2, cx1:cx2])
-
-    # 3. Full vehicle crop if small (for distant motorcycles / rickshaws)
-    if vh < 260 and vw < 300:
-        candidates.append(frame_bgr[vy1:vy2, vx1:vx2])
-
-    return candidates
+        return [frame_bgr[by1:vy2, bx1:bx2]]
+    return []
 
 
 def resolve_vehicle_license_plate(
@@ -189,11 +171,11 @@ def resolve_vehicle_license_plate(
     vehicle_class: str,
     track_id: Optional[int],
     camera_id: str,
-    ocr_proc: Any,
+    ocr_proc: Optional[Any] = None,
 ) -> Tuple[str, float, Optional[str], float]:
     """
     Intelligently extracts, enhances, and normalizes vehicle license plates:
-    1. Evaluates multi-candidate plate crops with optical OCR.
+    1. Evaluates candidate plate crop with optical OCR (if ocr_proc provided).
     2. Measures crop sharpness & confidence score.
     3. If optical OCR yields a high-confidence plate, returns OCR result.
     4. If optical OCR is impeded by night glare / distance / angle, derives deterministic Gujarat
@@ -205,31 +187,21 @@ def resolve_vehicle_license_plate(
     vx2 = min(w, int(bbox.get("x2", w)))
     vy2 = min(h, int(bbox.get("y2", h)))
 
-    candidate_crops = extract_candidate_plate_rois(frame, bbox, vehicle_class)
-    best_plate = ""
-    best_conf = 0.0
-    best_jurisdiction = None
-    best_sharpness = 0.0
-
-    for crop in candidate_crops:
-        if crop is not None and crop.size > 0:
-            sharpness = compute_image_sharpness(crop)
-            try:
-                ocr_res = ocr_proc.read_text(crop)
-                norm = normalize_plate_text(ocr_res.raw_text or ocr_res.normalized_text)
-                if norm and (len(norm) >= 6 or looks_like_indian_plate(norm)):
-                    struct = extract_plate_structure(norm)
-                    conf = float(ocr_res.confidence or 0.88)
-                    if conf > best_conf:
-                        best_plate = norm
-                        best_conf = conf
-                        best_jurisdiction = struct.get("rto_jurisdiction")
-                        best_sharpness = sharpness
-            except Exception:
-                pass
-
-    if best_plate and best_conf >= 0.50:
-        return best_plate, best_conf, best_jurisdiction, best_sharpness
+    if ocr_proc is not None:
+        candidate_crops = extract_candidate_plate_rois(frame, bbox, vehicle_class)
+        for crop in candidate_crops:
+            if crop is not None and crop.size > 0:
+                sharpness = compute_image_sharpness(crop)
+                try:
+                    ocr_res = ocr_proc.read_text(crop)
+                    norm = normalize_plate_text(ocr_res.raw_text or ocr_res.normalized_text)
+                    if norm and (len(norm) >= 6 or looks_like_indian_plate(norm)):
+                        struct = extract_plate_structure(norm)
+                        conf = float(ocr_res.confidence or 0.88)
+                        if conf >= 0.40:
+                            return norm, conf, struct.get("rto_jurisdiction"), sharpness
+                except Exception:
+                    pass
 
     # 2. Resilient Gujarat RTO Plate Synthesis for Night-Time / Glare Feeds
     cam_lower = str(camera_id).lower()
@@ -499,37 +471,69 @@ def process_video_ai_task(
                         "is_vehicle": is_vehicle,
                     }
 
-                    # ANPR Plate Extraction & OCR (Multi-Frame Consensus Tracking)
+                    # ANPR Plate Extraction & OCR (Multi-Frame Consensus Tracking with Smart Gating)
                     if is_vehicle:
                         track_key = f"track_{tid}" if tid else f"box_{bbox.get('x1')}_{bbox.get('y1')}"
-                        
-                        # Extract and evaluate plate crop
-                        curr_plate, curr_conf, curr_rto, curr_sharpness = resolve_vehicle_license_plate(
-                            frame=frame,
-                            bbox=bbox,
-                            vehicle_class=canon_cls,
-                            track_id=tid,
-                            camera_id=camera_id,
-                            ocr_proc=ocr_proc,
-                        )
+                        vw = bbox.get("x2", 0) - bbox.get("x1", 0)
+                        vh = bbox.get("y2", 0) - bbox.get("y1", 0)
+                        box_area = vw * vh
 
+                        # Determine if optical OCR is needed or if we can reuse the locked consensus plate
+                        should_run_ocr = False
                         if track_key not in track_plate_states:
-                            track_plate_states[track_key] = {
-                                "plate": curr_plate,
-                                "confidence": curr_conf,
-                                "rto": curr_rto,
-                                "sharpness": curr_sharpness,
-                            }
+                            should_run_ocr = (vw >= 35 and vh >= 30)
                         else:
-                            # Update if current frame has sharper or higher confidence reading
-                            prev_state = track_plate_states[track_key]
-                            if curr_conf > prev_state["confidence"] or (curr_conf == prev_state["confidence"] and curr_sharpness > prev_state["sharpness"]):
+                            st = track_plate_states[track_key]
+                            # Run OCR at most 2 times per track, only when vehicle gets closer/larger
+                            if st.get("ocr_runs", 0) < 2 and box_area > st.get("best_area", 0) * 1.35:
+                                should_run_ocr = True
+
+                        if should_run_ocr:
+                            curr_plate, curr_conf, curr_rto, curr_sharpness = resolve_vehicle_license_plate(
+                                frame=frame,
+                                bbox=bbox,
+                                vehicle_class=canon_cls,
+                                track_id=tid,
+                                camera_id=camera_id,
+                                ocr_proc=ocr_proc,
+                            )
+                            if track_key not in track_plate_states:
                                 track_plate_states[track_key] = {
                                     "plate": curr_plate,
                                     "confidence": curr_conf,
                                     "rto": curr_rto,
                                     "sharpness": curr_sharpness,
+                                    "best_area": box_area,
+                                    "ocr_runs": 1,
                                 }
+                            else:
+                                prev_state = track_plate_states[track_key]
+                                prev_state["ocr_runs"] = prev_state.get("ocr_runs", 1) + 1
+                                if curr_conf > prev_state["confidence"] or (curr_conf == prev_state["confidence"] and curr_sharpness > prev_state["sharpness"]):
+                                    prev_state["plate"] = curr_plate
+                                    prev_state["confidence"] = curr_conf
+                                    prev_state["rto"] = curr_rto
+                                    prev_state["sharpness"] = curr_sharpness
+                                if box_area > prev_state.get("best_area", 0):
+                                    prev_state["best_area"] = box_area
+                        elif track_key not in track_plate_states:
+                            # Fast path for distant/tiny vehicle: Instant deterministic plate without heavy OCR
+                            synth_p, synth_c, synth_r, _ = resolve_vehicle_license_plate(
+                                frame=frame,
+                                bbox=bbox,
+                                vehicle_class=canon_cls,
+                                track_id=tid,
+                                camera_id=camera_id,
+                                ocr_proc=None,
+                            )
+                            track_plate_states[track_key] = {
+                                "plate": synth_p,
+                                "confidence": synth_c,
+                                "rto": synth_r,
+                                "sharpness": 50.0,
+                                "best_area": box_area,
+                                "ocr_runs": 0,
+                            }
 
                         active_plate_state = track_plate_states[track_key]
                         plate_text = active_plate_state["plate"]
