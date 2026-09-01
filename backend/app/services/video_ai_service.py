@@ -26,6 +26,7 @@ from app.ai.anpr.normalize import extract_plate_structure, looks_like_indian_pla
 from app.ai.anpr.ocr import build_ocr_processor
 from app.ai.yolo26.detector import get_detector
 from app.ai.yolo26.tracker import YOLO26Tracker
+from app.ai.yolo26.two_wheeler_classifier import get_two_wheeler_classifier
 from app.ai.yolo26.utils import normalize_class_name
 
 logger = logging.getLogger("phantom.services.video_ai")
@@ -293,13 +294,19 @@ def draw_hud_annotations(
             continue
 
         obj_class = det.get("object_class", "OBJECT").upper()
+        disp_raw = det.get("display_name") or obj_class.replace("_", " ")
         conf = det.get("confidence", 0.0)
         conf_pct = int(round(conf * 100))
         plate_str = det.get("license_plate")
         plate_conf = det.get("plate_confidence")
         tid = det.get("track_id")
+        tw_subtype = det.get("two_wheeler_subtype")
 
         color = color_map.get(obj_class, (0, 240, 255))
+        if tw_subtype == "SCOOTER" or "ACTIVA" in disp_raw.upper() or "ACCESS" in disp_raw.upper():
+            color = (56, 189, 248)  # Electric Sky Blue for Scooters
+        elif obj_class == "MOTORCYCLE" or tw_subtype == "MOTORCYCLE":
+            color = (192, 132, 252)  # Purple for Bikes
 
         # 1. Main Bounding Box
         cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
@@ -315,9 +322,9 @@ def draw_hud_annotations(
         cv2.line(annotated, (x2, y2), (x2 - corner_len, y2), color, 3)
         cv2.line(annotated, (x2, y2), (x2, y2 - corner_len), color, 3)
 
-        # 3. Class & Tracking Tag Badge (e.g. 'CAR #3 94%', 'PERSON #1 89%', 'AUTO RICKSHAW 91%')
+        # 3. Class & Model Tracking Tag Badge (e.g. 'HONDA ACTIVA #3 94%', 'ROYAL ENFIELD #1 96%', 'HERO SPLENDOR #2 95%')
         if mode in (ProcessingMode.YOLO, ProcessingMode.YOLO_ANPR):
-            display_name = obj_class.replace("_", " ")
+            display_name = disp_raw.upper()
             track_suffix = f" #{tid}" if tid else ""
             label = f"{display_name}{track_suffix} {conf_pct}%"
             (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.44, 1)
@@ -368,6 +375,7 @@ def process_video_ai_task(
     detector = get_detector()
     ocr_proc = build_ocr_processor()
     tracker = YOLO26Tracker(camera_id=camera_id)
+    two_wheeler_classifier = get_two_wheeler_classifier()
 
     cap = cv2.VideoCapture(input_path)
     if not cap.isOpened():
@@ -471,6 +479,24 @@ def process_video_ai_task(
                         "is_vehicle": is_vehicle,
                     }
 
+                    # Two-Wheeler Fine-Grained Make & Model Classification (Activa, Access, Splendor, Pulsar, Royal Enfield)
+                    tw_model_name = None
+                    tw_subtype = None
+                    if canon_cls in ("MOTORCYCLE", "BICYCLE"):
+                        bx1 = max(0, int(bbox.get("x1", 0)))
+                        by1 = max(0, int(bbox.get("y1", 0)))
+                        bx2 = min(width, int(bbox.get("x2", width)))
+                        by2 = min(height, int(bbox.get("y2", height)))
+                        if bx2 > bx1 and by2 > by1:
+                            tw_crop = frame[by1:by2, bx1:bx2]
+                            tw_res = two_wheeler_classifier.classify_crop(tw_crop, track_id=tid, raw_confidence=conf)
+                            tw_model_name = tw_res.make_model
+                            tw_subtype = tw_res.subtype
+                            det_item["display_name"] = tw_res.display_tag
+                            det_item["two_wheeler_model"] = tw_res.make_model
+                            det_item["two_wheeler_subtype"] = tw_res.subtype
+                            det_item["confidence"] = tw_res.confidence
+
                     # ANPR Plate Extraction & OCR (Multi-Frame Consensus Tracking with Smart Gating)
                     if is_vehicle:
                         track_key = f"track_{tid}" if tid else f"box_{bbox.get('x1')}_{bbox.get('y1')}"
@@ -545,6 +571,9 @@ def process_video_ai_task(
                             det_item["plate_confidence"] = plate_conf
                             det_item["rto_jurisdiction"] = rto_name
 
+                            # Vehicle Label with Make & Model
+                            vehicle_label = f"{tw_model_name} ({tw_subtype.title()})" if tw_model_name else canon_cls.replace("_", " ").title()
+
                             # Update ANPR Table
                             if plate_text in anpr_dict:
                                 item = anpr_dict[plate_text]
@@ -559,7 +588,7 @@ def process_video_ai_task(
                                     confidence=round(plate_conf, 4),
                                     time_str=time_str,
                                     timestamp_sec=round(pts_sec, 2),
-                                    vehicle=canon_cls.replace("_", " ").title(),
+                                    vehicle=vehicle_label,
                                     rto_jurisdiction=rto_name or "Gujarat RTO",
                                     is_gujarat=plate_text.startswith("GJ"),
                                     first_seen_frame=frame_idx,
@@ -578,7 +607,7 @@ def process_video_ai_task(
                                 confidence=round(plate_conf, 4),
                                 bounding_box=bbox,
                                 is_vehicle=True,
-                                vehicle_type=canon_cls.replace("_", " ").title(),
+                                vehicle_type=tw_model_name or canon_cls.replace("_", " ").title(),
                                 license_plate=plate_text,
                                 plate_confidence=round(plate_conf, 4),
                                 rto_jurisdiction=rto_name,
@@ -589,8 +618,10 @@ def process_video_ai_task(
                     # Push main detection
                     total_dets += 1
                     class_counts[canon_cls] = class_counts.get(canon_cls, 0) + 1
+                    if tw_model_name:
+                        class_counts[tw_model_name] = class_counts.get(tw_model_name, 0) + 1
 
-                    disp_name = canon_cls.capitalize() if canon_cls != "CAR" else "Car"
+                    disp_name = det_item.get("display_name") or (canon_cls.replace("_", " ").title() if canon_cls != "PERSON" else "Person")
                     event = DetectionEvent(
                         frame_idx=frame_idx,
                         timestamp_sec=round(pts_sec, 2),
@@ -600,7 +631,7 @@ def process_video_ai_task(
                         confidence=round(conf, 4),
                         bounding_box=bbox,
                         is_vehicle=is_vehicle,
-                        vehicle_type=canon_cls.capitalize() if is_vehicle else None,
+                        vehicle_type=tw_model_name or (canon_cls.capitalize() if is_vehicle else None),
                         license_plate=det_item.get("license_plate"),
                         plate_confidence=det_item.get("plate_confidence"),
                         rto_jurisdiction=det_item.get("rto_jurisdiction"),

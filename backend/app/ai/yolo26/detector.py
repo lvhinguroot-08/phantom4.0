@@ -234,9 +234,9 @@ class YOLO26Detector:
                                             det["confidence"] = max(conf, other["confidence"])
                         processed_list.append(det)
 
-                    # 2. Person vs Motorcycle Disambiguation
+                    # 2. Person Validation (Keep true pedestrians as PERSON)
                     elif canon == "PERSON":
-                        # Check if this person overlaps a motorcycle
+                        # Check if this person overlaps a motorcycle / bicycle
                         has_moto_overlap = False
                         for j, other in enumerate(results_list):
                             if i != j and j not in suppressed_indices:
@@ -247,31 +247,20 @@ class YOLO26Detector:
                                     ix2 = min(bx["x2"], obx["x2"])
                                     iy2 = min(bx["y2"], obx["y2"])
                                     if ix2 > ix1 and iy2 > iy1:
-                                        has_moto_overlap = True
-                                        break
+                                        inter_area = (ix2 - ix1) * (iy2 - iy1)
+                                        o_area = (obx["x2"] - obx["x1"]) * (obx["y2"] - obx["y1"])
+                                        if inter_area / float(area) > 0.20 or inter_area / float(o_area) > 0.20:
+                                            has_moto_overlap = True
+                                            break
                         if has_moto_overlap:
-                            # Subsumed by motorcycle
+                            # Subsumed by motorcycle rider fusion
                             suppressed_indices.add(i)
                             continue
 
-                        # A true pedestrian on foot has a slender vertical aspect ratio (AR >= 1.95)
-                        # A person sitting on a bike/scooter or moving with vehicle geometry has AR < 1.95
-                        if ar < 1.95 and bw >= 26 and area >= 1000:
-                            # Reclassify as motorcycle (2-wheeler + rider entity)
-                            det["class_name"] = "motorcycle"
-                            det["class_id"] = 3
-                            processed_list.append(det)
-                        elif ar >= 1.70:
-                            # Valid true pedestrian
+                        # Keep as true Pedestrian (filter out extreme static poles / ground artifacts)
+                        if 0.80 <= ar <= 4.5:
                             det["class_name"] = "person"
                             det["class_id"] = 0
-                            processed_list.append(det)
-                        elif conf < 0.40:
-                            # Low confidence non-human static artifact, skip
-                            continue
-                        else:
-                            det["class_name"] = "motorcycle"
-                            det["class_id"] = 3
                             processed_list.append(det)
 
                     # 3. Auto-Rickshaw & Vehicle Disambiguation

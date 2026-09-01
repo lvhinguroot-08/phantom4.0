@@ -38,13 +38,20 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             ("/api/v1/", self.default_requests, self.default_window),
         ]
 
-        # Exempt paths
+        # Exempt paths (Streams, CCTV Feeds, Health, Docs)
         self.exempt_prefixes = [
             "/health",
             "/api/v1/health",
             "/api/v1/docs",
             "/api/v1/openapi.json",
             "/api/v1/redoc",
+            "/api/v1/streams",
+            "/api/v1/cameras",
+            "/api/streams",
+            "/api/camera",
+            "/api/sample-cameras",
+            "/api/sample-video",
+            "/streams",
         ]
 
     def _get_rule_for_path(self, path: str) -> Tuple[str, int, int]:

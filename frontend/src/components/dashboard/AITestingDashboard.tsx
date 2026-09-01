@@ -303,9 +303,16 @@ export const AITestingDashboard: React.FC = () => {
     if (feedFilter === 'ALL') return true;
     if (feedFilter === 'CARS') return ev.object_class === 'CAR' || ev.vehicle_type?.toLowerCase() === 'car';
     if (feedFilter === 'AUTOS') return ev.object_class === 'AUTO_RICKSHAW' || ev.vehicle_type?.toLowerCase().includes('rickshaw');
+    if (feedFilter === 'SCOOTERS') {
+      const name = (ev.display_name || ev.vehicle_type || '').toLowerCase();
+      return name.includes('activa') || name.includes('access') || name.includes('jupiter') || name.includes('scooter');
+    }
+    if (feedFilter === 'BIKES') {
+      const name = (ev.display_name || ev.vehicle_type || '').toLowerCase();
+      return name.includes('splendor') || name.includes('pulsar') || name.includes('royal') || name.includes('enfield') || name.includes('shine') || name.includes('apache') || (ev.object_class === 'MOTORCYCLE' && !name.includes('activa') && !name.includes('access') && !name.includes('jupiter'));
+    }
     if (feedFilter === 'BUSES') return ev.object_class === 'BUS' || ev.vehicle_type?.toLowerCase() === 'bus';
     if (feedFilter === 'TRUCKS') return ev.object_class === 'TRUCK' || ev.vehicle_type?.toLowerCase() === 'truck';
-    if (feedFilter === 'MOTORCYCLES') return ev.object_class === 'MOTORCYCLE' || ev.vehicle_type?.toLowerCase() === 'motorcycle';
     if (feedFilter === 'PERSONS') return ev.object_class === 'PERSON';
     if (feedFilter === 'PLATES') return Boolean(ev.license_plate);
     return true;
@@ -1391,7 +1398,7 @@ export const AITestingDashboard: React.FC = () => {
 
           {/* Filter Bar */}
           <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-            {['ALL', 'CARS', 'AUTOS', 'BUSES', 'TRUCKS', 'MOTORCYCLES', 'PERSONS', 'PLATES'].map((flt) => (
+            {['ALL', 'CARS', 'AUTOS', 'SCOOTERS', 'BIKES', 'BUSES', 'TRUCKS', 'PERSONS', 'PLATES'].map((flt) => (
               <button
                 key={flt}
                 onClick={() => setFeedFilter(flt)}
@@ -1459,9 +1466,11 @@ export const AITestingDashboard: React.FC = () => {
                   const isPlate = Boolean(ev.license_plate && ev.object_class === ev.license_plate);
                   const isCar = ev.object_class === 'CAR' || ev.vehicle_type?.toLowerCase() === 'car';
                   const isAutoRickshaw = ev.object_class === 'AUTO_RICKSHAW' || ev.vehicle_type?.toLowerCase().includes('rickshaw');
+                  const nameLower = (ev.display_name || ev.vehicle_type || '').toLowerCase();
+                  const isScooter = nameLower.includes('activa') || nameLower.includes('access') || nameLower.includes('jupiter') || nameLower.includes('scooter');
+                  const isBike = nameLower.includes('splendor') || nameLower.includes('pulsar') || nameLower.includes('royal') || nameLower.includes('enfield') || nameLower.includes('shine') || nameLower.includes('apache') || (ev.object_class === 'MOTORCYCLE' && !isScooter);
                   const isBus = ev.object_class === 'BUS' || ev.vehicle_type?.toLowerCase() === 'bus';
                   const isTruck = ev.object_class === 'TRUCK' || ev.vehicle_type?.toLowerCase() === 'truck';
-                  const isMotorcycle = ev.object_class === 'MOTORCYCLE' || ev.vehicle_type?.toLowerCase() === 'motorcycle';
                   const isPerson = ev.object_class === 'PERSON';
                   const confPct = Math.round(ev.confidence * 100);
 
@@ -1481,14 +1490,16 @@ export const AITestingDashboard: React.FC = () => {
                           ? '4px solid #ef4444'
                           : isAutoRickshaw
                           ? '4px solid #38bdf8'
+                          : isScooter
+                          ? '4px solid #06b6d4'
+                          : isBike
+                          ? '4px solid #c084fc'
                           : isCar
                           ? '4px solid #10b981'
                           : isBus
                           ? '4px solid #d97706'
                           : isTruck
                           ? '4px solid #f59e0b'
-                          : isMotorcycle
-                          ? '4px solid #c084fc'
                           : isPerson
                           ? '4px solid #00f0ff'
                           : '4px solid #38bdf8',
@@ -1510,14 +1521,16 @@ export const AITestingDashboard: React.FC = () => {
                           </span>
                         ) : isAutoRickshaw ? (
                           <Car size={14} style={{ color: '#38bdf8' }} />
+                        ) : isScooter ? (
+                          <Bike size={14} style={{ color: '#06b6d4' }} />
+                        ) : isBike ? (
+                          <Bike size={14} style={{ color: '#c084fc' }} />
                         ) : isCar ? (
                           <Car size={14} style={{ color: '#10b981' }} />
                         ) : isBus ? (
                           <Bus size={14} style={{ color: '#d97706' }} />
                         ) : isTruck ? (
                           <Truck size={14} style={{ color: '#f59e0b' }} />
-                        ) : isMotorcycle ? (
-                          <Bike size={14} style={{ color: '#c084fc' }} />
                         ) : isPerson ? (
                           <User size={14} style={{ color: '#00f0ff' }} />
                         ) : (

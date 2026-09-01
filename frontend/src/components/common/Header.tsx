@@ -38,7 +38,7 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleMobileMenu,
 }) => {
   const { theme, toggleTheme } = useTheme();
-  const { isConnected, isDbReady, latencyMs, systemInfo } = useBackendStatus();
+  const { isConnected, isDbReady, readiness, latencyMs, systemInfo } = useBackendStatus();
   const { connectionStatus, unreadCount, isSoundEnabled, toggleSound } = useRealtimeEvents();
   const { user, operationalMode, logout } = useAuth();
   const [utcTime, setUtcTime] = useState<string>('');
@@ -133,7 +133,7 @@ export const Header: React.FC<HeaderProps> = ({
             <Server size={13} />
             <div className="pill-meta">
               <span className="pill-title">
-                {isConnected ? `API ONLINE (v${systemInfo?.version || '4.8'})` : 'DATA UNAVAILABLE'}
+                {isConnected ? `API ONLINE (v${systemInfo?.version || '4.8'})` : 'API OFFLINE'}
               </span>
               <span className="pill-sub">
                 {isConnected && latencyMs !== null ? `${latencyMs}ms LATENCY` : 'BACKEND OFFLINE'}
@@ -146,10 +146,10 @@ export const Header: React.FC<HeaderProps> = ({
             <Database size={13} />
             <div className="pill-meta">
               <span className="pill-title">
-                {isDbReady ? 'POSTGIS READY' : 'DATA UNAVAILABLE'}
+                {isDbReady ? (readiness?.database?.mode === 'STANDALONE_LOCAL' ? 'DATA AVAILABLE' : 'POSTGIS READY') : 'DATA UNAVAILABLE'}
               </span>
               <span className="pill-sub">
-                {isDbReady ? 'SPATIAL INDEXED' : 'DB DISCONNECTED'}
+                {isDbReady ? (readiness?.database?.mode === 'STANDALONE_LOCAL' ? 'LOCAL / IN-MEMORY' : 'SPATIAL INDEXED') : 'DB DISCONNECTED'}
               </span>
             </div>
           </div>

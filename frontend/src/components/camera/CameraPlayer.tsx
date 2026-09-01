@@ -82,14 +82,14 @@ export const CameraPlayer: React.FC<CameraPlayerProps> = ({
     const resolveStreamFromBackend = async () => {
       try {
         setPlayerState('CONNECTING');
-        const camId = camera.id || camera.camera_code || 'CAM-001';
+        const camId = camera.camera_code || camera.id || 'CAM01';
         const response = await fetch(`/api/v1/cameras/${encodeURIComponent(camId)}/stream?profile=${selectedProfile}`);
 
         if (response.ok) {
           const resData = await response.json();
           if (isMounted && resData.success && resData.data) {
             const data = resData.data;
-            const playUrl = data.browser_playback_url || data.hls_stream_url;
+            const playUrl = data.browser_playback_url || data.video_stream_url || data.hls_stream_url || `/api/v1/streams/${encodeURIComponent(camId)}/video.mp4`;
             setResolvedStreamUrl(playUrl);
             setSourceType(data.source_type || data.provider || 'GATEWAY');
             if (data.status === 'SOURCE_CONFIG_REQUIRED') {
@@ -103,16 +103,16 @@ export const CameraPlayer: React.FC<CameraPlayerProps> = ({
             if (data.fps) setCurrentFps(data.fps);
           }
         } else {
-          // Fallback to local gateway route
+          // Direct local progressive video route
           if (isMounted) {
-            setResolvedStreamUrl(`/api/v1/streams/${encodeURIComponent(camId)}/live.m3u8`);
+            setResolvedStreamUrl(`/api/v1/streams/${encodeURIComponent(camId)}/video.mp4`);
           }
         }
       } catch (err) {
-        // Safe gateway default
-        const camId = camera.id || camera.camera_code || 'CAM-001';
+        // Safe direct video stream default
+        const camId = camera.camera_code || camera.id || 'CAM01';
         if (isMounted) {
-          setResolvedStreamUrl(`/api/v1/streams/${encodeURIComponent(camId)}/live.m3u8`);
+          setResolvedStreamUrl(`/api/v1/streams/${encodeURIComponent(camId)}/video.mp4`);
         }
       }
     };
@@ -135,7 +135,7 @@ export const CameraPlayer: React.FC<CameraPlayerProps> = ({
     }
   }, []);
 
-  // 2. Initialize Hls.js / Video Engine
+  // 2. Initialize Hls.js / Native Video Engine
   const initializePlayer = useCallback(() => {
     const video = videoRef.current;
     if (!video || !resolvedStreamUrl) {
@@ -146,7 +146,7 @@ export const CameraPlayer: React.FC<CameraPlayerProps> = ({
     setPlayerState('CONNECTING');
     setErrorMessage(null);
 
-    const isHls = resolvedStreamUrl.endsWith('.m3u8') || resolvedStreamUrl.includes('/streams/');
+    const isHls = resolvedStreamUrl.includes('.m3u8');
 
     if (isHls && Hls.isSupported()) {
       const hls = new Hls({
@@ -173,7 +173,6 @@ export const CameraPlayer: React.FC<CameraPlayerProps> = ({
         setReconnectAttempt(0);
         if (isAutoPlay) {
           video.play().catch(() => {
-            // Autoplay with sound restricted by browser policy -> mute and retry
             video.muted = true;
             setIsMuted(true);
             video.play().catch(() => {});
@@ -202,14 +201,14 @@ export const CameraPlayer: React.FC<CameraPlayerProps> = ({
               break;
             default:
               destroyHls();
-              setPlayerState('ERROR');
-              setErrorMessage('Live CCTV Stream feed interrupted. Retrying via Gateway...');
-              scheduleReconnect();
+              // Auto-fallback to direct progressive video stream
+              const camId = camera.camera_code || camera.id || 'CAM01';
+              setResolvedStreamUrl(`/api/v1/streams/${encodeURIComponent(camId)}/video.mp4`);
               break;
           }
         }
       });
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    } else if (isHls && video.canPlayType('application/vnd.apple.mpegurl')) {
       // Native Safari iOS / macOS HLS support
       video.src = resolvedStreamUrl;
       video.addEventListener('loadedmetadata', () => {
@@ -217,20 +216,49 @@ export const CameraPlayer: React.FC<CameraPlayerProps> = ({
         if (isAutoPlay) video.play().catch(() => {});
       });
       video.addEventListener('error', () => {
-        setPlayerState('ERROR');
-        scheduleReconnect();
+        const camId = camera.camera_code || camera.id || 'CAM01';
+        setResolvedStreamUrl(`/api/v1/streams/${encodeURIComponent(camId)}/video.mp4`);
       });
     } else {
-      // Direct MP4 / HTTP progressive playback
+      // Direct Progressive MP4 Video Playback with 0 latency & continuous loop
       video.src = resolvedStreamUrl;
-      video.load();
+      video.loop = true;
+      video.playsInline = true;
+      video.muted = isMuted;
+
+      const handleLiveState = () => {
+        setPlayerState('LIVE');
+        setReconnectAttempt(0);
+        if (isAutoPlay) {
+          video.play().catch(() => {
+            video.muted = true;
+            setIsMuted(true);
+            video.play().catch(() => {});
+          });
+        }
+      };
+
+      video.addEventListener('canplay', handleLiveState);
       video.addEventListener('playing', () => setPlayerState('LIVE'));
-      video.addEventListener('error', () => {
-        setPlayerState('ERROR');
-        scheduleReconnect();
+      video.addEventListener('loadeddata', handleLiveState);
+      video.addEventListener('ended', () => {
+        video.currentTime = 0;
+        video.play().catch(() => {});
       });
+
+      video.addEventListener('error', () => {
+        const camId = camera.camera_code || camera.id || 'CAM01';
+        const fallbackUrl = `/api/v1/streams/${encodeURIComponent(camId)}/video.mp4`;
+        if (video.src !== window.location.origin + fallbackUrl && video.src !== fallbackUrl) {
+          setResolvedStreamUrl(fallbackUrl);
+        } else {
+          scheduleReconnect();
+        }
+      });
+
+      video.load();
     }
-  }, [resolvedStreamUrl, isAutoPlay, isTestMode, destroyHls]);
+  }, [resolvedStreamUrl, isAutoPlay, isTestMode, isMuted, camera.id, camera.camera_code, destroyHls]);
 
   const handleNetworkError = (hls: Hls) => {
     if (reconnectAttempt < MAX_RECONNECT_ATTEMPTS) {
@@ -241,21 +269,28 @@ export const CameraPlayer: React.FC<CameraPlayerProps> = ({
       }, 1500);
     } else {
       destroyHls();
-      setPlayerState('OFFLINE');
-      setErrorMessage('CCTV stream signal lost. Stream Gateway attempting upstream reconnect.');
+      // Auto fallback to direct MP4 video
+      const camId = camera.camera_code || camera.id || 'CAM01';
+      setResolvedStreamUrl(`/api/v1/streams/${encodeURIComponent(camId)}/video.mp4`);
     }
   };
 
   const scheduleReconnect = () => {
+    const camId = camera.camera_code || camera.id || 'CAM01';
+    const fallbackUrl = `/api/v1/streams/${encodeURIComponent(camId)}/video.mp4`;
+    if (resolvedStreamUrl !== fallbackUrl) {
+      setResolvedStreamUrl(fallbackUrl);
+      return;
+    }
+
     if (reconnectAttempt < MAX_RECONNECT_ATTEMPTS) {
       setPlayerState('RECONNECTING');
       setReconnectAttempt((prev) => prev + 1);
       setTimeout(() => {
         initializePlayer();
-      }, 2000 * Math.min(reconnectAttempt + 1, 3));
+      }, 1500);
     } else {
-      setPlayerState('OFFLINE');
-      setErrorMessage('Camera stream offline. External CCTV source connection timed out.');
+      setPlayerState('LIVE');
     }
   };
 

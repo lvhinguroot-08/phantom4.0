@@ -14,10 +14,12 @@ export interface ReadinessResponse {
   timestamp: string;
   database: {
     connected: boolean;
+    mode?: string;
     postgres_version?: string;
     postgis_version?: string;
     latency_ms?: number;
     error?: string;
+    warning?: string;
   };
 }
 

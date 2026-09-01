@@ -156,7 +156,7 @@ export const camerasApi = {
                 id: `stream_${c.id}`,
                 camera_id: c.id,
                 protocol: 'HLS',
-                stream_url: c.hls_url || `https://cctv.corp8.cloud/${c.id}/index.m3u8`,
+                stream_url: `/api/v1/streams/${c.id}/video.mp4`,
                 rtsp_url: c.rtsp_url,
                 webrtc_url: c.webrtc_url,
                 resolution: '1080p',

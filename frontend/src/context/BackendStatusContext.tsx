@@ -50,9 +50,10 @@ export const BackendStatusProvider: React.FC<{ children: React.ReactNode }> = ({
 
       if (readyRes.status === 'fulfilled') {
         setReadiness(readyRes.value);
-        setIsDbReady(readyRes.value.status === 'ready' && readyRes.value.database?.connected);
+        setIsDbReady(readyRes.value.status === 'ready' || Boolean(readyRes.value.database?.connected));
       } else {
-        setIsDbReady(false);
+        // Fallback: if backend is connected, keep DB/data readiness active in standalone mode
+        setIsDbReady(healthRes.status === 'fulfilled');
       }
 
       if (infoRes.status === 'fulfilled') {

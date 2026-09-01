@@ -23,6 +23,7 @@ from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.api.router import api_v1_router
 from app.api.v1.health import router as root_health_router
+from app.api.v1.endpoints.unified_ai_routes import router as unified_ai_router
 
 
 @asynccontextmanager
@@ -255,6 +256,9 @@ def create_application() -> FastAPI:
         }
 
     # 4. Mount Routers
+    # Direct unified AI routes (/api/upload, /api/process, /api/cameras, /api/results/{id}, etc.)
+    app.include_router(unified_ai_router)
+
     # Root-level health endpoints (e.g. /health, /health/ready, /health/live)
     app.include_router(root_health_router)
 

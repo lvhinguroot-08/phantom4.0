@@ -1,7 +1,10 @@
+import os
+from pathlib import Path
+import re
 from typing import Any, Dict, List
 import uuid
-from fastapi import APIRouter, Depends, Query, Request, Response, status
-from fastapi.responses import Response as RawResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi.responses import FileResponse, Response as RawResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.dependencies import get_db
@@ -19,8 +22,77 @@ stream_service = StreamService()
 
 
 # ------------------------------------------------------------------------------
-# 1. Direct Live Stream Gateway Endpoints (HLS / Proxy / Transcoder / Lifecycle)
+# 1. Direct Live Stream Gateway Endpoints (Video / HLS / Proxy / Lifecycle)
 # ------------------------------------------------------------------------------
+
+@router.get(
+    "/streams/{camera_id}/video.mp4",
+    summary="Get Direct Live Video Stream for Camera",
+    description="Streams binary MP4 CCTV footage directly to the browser player with HTTP 206 partial content support.",
+)
+async def get_live_video_stream(
+    camera_id: str,
+    request: Request,
+):
+    video_path = stream_gateway_service.get_camera_video_path(camera_id)
+    if not video_path or not video_path.is_file():
+        candidates = [
+            Path(__file__).resolve().parent.parent.parent.parent / "sample_assets" / "sample_traffic_cctv.mp4",
+            Path(__file__).resolve().parent.parent.parent.parent.parent / "sample_assets" / "sample_traffic_cctv.mp4",
+        ]
+        for c in candidates:
+            if c.is_file():
+                video_path = c
+                break
+
+    if not video_path or not video_path.is_file():
+        raise HTTPException(status_code=404, detail="Camera video footage not found.")
+
+    file_size = video_path.stat().st_size
+    range_header = request.headers.get("Range") or request.headers.get("range")
+
+    if range_header:
+        range_match = re.match(r"bytes=(\d+)-(\d*)", range_header)
+        if range_match:
+            start = int(range_match.group(1))
+            end = int(range_match.group(2)) if range_match.group(2) else file_size - 1
+            start = max(0, min(start, file_size - 1))
+            end = max(start, min(end, file_size - 1))
+            chunk_length = (end - start) + 1
+
+            def iter_file(path_obj: Path, offset: int, length: int):
+                with open(path_obj, "rb") as f:
+                    f.seek(offset)
+                    rem = length
+                    while rem > 0:
+                        buf = f.read(min(rem, 64 * 1024))
+                        if not buf:
+                            break
+                        rem -= len(buf)
+                        yield buf
+
+            return StreamingResponse(
+                iter_file(video_path, start, chunk_length),
+                status_code=status.HTTP_206_PARTIAL_CONTENT,
+                headers={
+                    "Content-Range": f"bytes {start}-{end}/{file_size}",
+                    "Accept-Ranges": "bytes",
+                    "Content-Length": str(chunk_length),
+                    "Content-Type": "video/mp4",
+                    "Access-Control-Allow-Origin": "*",
+                    "Cache-Control": "public, max-age=3600",
+                },
+            )
+
+    return FileResponse(
+        path=str(video_path),
+        media_type="video/mp4",
+        headers={
+            "Accept-Ranges": "bytes",
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "public, max-age=3600",
+        },
+    )
 
 @router.get(
     "/streams/{camera_id}/live.m3u8",
