@@ -172,42 +172,16 @@ class YOLO26Detector:
                         if bw < 14 or bh < 14:
                             continue  # Filter sub-pixel / tiny noise artifacts
 
-                        # --- Intelligent Validation & False-Positive Suppression ---
                         aspect_ratio = bh / float(bw) if bw > 0 else 1.0
                         box_area = bw * bh
 
-                        # 1. Person Validation (Suppress signposts, lamp poles, thin vertical artifacts)
-                        if clean_name in ("person", "pedestrian"):
-                            # A real human in CCTV has aspect ratio between 1.3 and 4.2
-                            if aspect_ratio > 4.5 or aspect_ratio < 0.9:
-                                continue  # Reject ultra-thin poles or wide non-human objects
-                            # In low-light / night conditions, require higher confidence for pedestrians
-                            if conf < 0.40 and (aspect_ratio < 1.4 or aspect_ratio > 3.8):
-                                continue
-
-                        # 2. Vehicle Disambiguation & Auto-Rickshaw Identification
-                        refined_name = clean_name
-                        canon = normalize_class_name(clean_name)
-
-                        if canon in ("TRUCK", "CAR", "MOTORCYCLE", "OTHER_VEHICLE"):
-                            # Auto-Rickshaw / 3-Wheeler detection (typical Indian urban traffic)
-                            # Compact boxy footprint: aspect ratio ~0.9 to 1.45, moderate area
-                            if 0.85 <= aspect_ratio <= 1.45 and 1500 <= box_area <= 28000:
-                                # Check if classified as truck despite small footprint
-                                if canon == "TRUCK" and box_area < 25000:
-                                    refined_name = "auto_rickshaw"
-                                    cls_id = 80  # custom id for auto rickshaw
-                            elif canon == "TRUCK" and box_area < 8000:
-                                # A truck bounding box smaller than 8000px in 1080p is usually a car or rickshaw
-                                refined_name = "car"
-                                cls_id = 2
-                            elif canon == "BUS" and aspect_ratio > 1.8:
-                                # Buses are wide, not ultra-tall
-                                refined_name = "truck" if box_area > 30000 else "car"
+                        # Filter extreme non-physical dimensions
+                        if aspect_ratio > 4.8 or aspect_ratio < 0.25:
+                            continue
 
                         results_list.append({
                             "class_id": cls_id,
-                            "class_name": refined_name,
+                            "class_name": clean_name,
                             "confidence": round(conf, 4),
                             "bbox": {
                                 "x1": x1,
@@ -217,7 +191,102 @@ class YOLO26Detector:
                             },
                         })
 
-                return results_list
+                # --- Secondary Post-Processing: Person vs Motorcycle Fusion & Disambiguation ---
+                processed_list: List[Dict[str, Any]] = []
+                suppressed_indices = set()
+
+                for i, det in enumerate(results_list):
+                    if i in suppressed_indices:
+                        continue
+
+                    cname = det["class_name"].lower()
+                    canon = normalize_class_name(cname)
+                    bx = det["bbox"]
+                    bw = bx["x2"] - bx["x1"]
+                    bh = bx["y2"] - bx["y1"]
+                    ar = bh / float(bw) if bw > 0 else 1.0
+                    area = bw * bh
+                    conf = det["confidence"]
+
+                    # 1. Motorcycle & Rider Fusion
+                    if canon == "MOTORCYCLE":
+                        # Check for overlapping 'person' (the rider sitting on the bike)
+                        for j, other in enumerate(results_list):
+                            if i != j and j not in suppressed_indices:
+                                o_canon = normalize_class_name(other["class_name"])
+                                if o_canon == "PERSON":
+                                    obx = other["bbox"]
+                                    # Compute intersection
+                                    ix1 = max(bx["x1"], obx["x1"])
+                                    iy1 = max(bx["y1"], obx["y1"])
+                                    ix2 = min(bx["x2"], obx["x2"])
+                                    iy2 = min(bx["y2"], obx["y2"])
+                                    if ix2 > ix1 and iy2 > iy1:
+                                        inter_area = (ix2 - ix1) * (iy2 - iy1)
+                                        o_area = (obx["x2"] - obx["x1"]) * (obx["y2"] - obx["y1"])
+                                        # If person heavily overlaps motorcycle, merge rider into motorcycle
+                                        if inter_area / float(o_area) > 0.25 or inter_area / float(area) > 0.25:
+                                            suppressed_indices.add(j)
+                                            bx["x1"] = min(bx["x1"], obx["x1"])
+                                            bx["y1"] = min(bx["y1"], obx["y1"])
+                                            bx["x2"] = max(bx["x2"], obx["x2"])
+                                            bx["y2"] = max(bx["y2"], obx["y2"])
+                                            det["confidence"] = max(conf, other["confidence"])
+                        processed_list.append(det)
+
+                    # 2. Person vs Motorcycle Disambiguation
+                    elif canon == "PERSON":
+                        # Check if this person overlaps a motorcycle
+                        has_moto_overlap = False
+                        for j, other in enumerate(results_list):
+                            if i != j and j not in suppressed_indices:
+                                if normalize_class_name(other["class_name"]) in ("MOTORCYCLE", "BICYCLE"):
+                                    obx = other["bbox"]
+                                    ix1 = max(bx["x1"], obx["x1"])
+                                    iy1 = max(bx["y1"], obx["y1"])
+                                    ix2 = min(bx["x2"], obx["x2"])
+                                    iy2 = min(bx["y2"], obx["y2"])
+                                    if ix2 > ix1 and iy2 > iy1:
+                                        has_moto_overlap = True
+                                        break
+                        if has_moto_overlap:
+                            # Subsumed by motorcycle
+                            suppressed_indices.add(i)
+                            continue
+
+                        # A true pedestrian on foot has a slender vertical aspect ratio (AR >= 1.95)
+                        # A person sitting on a bike/scooter or moving with vehicle geometry has AR < 1.95
+                        if ar < 1.95 and bw >= 26 and area >= 1000:
+                            # Reclassify as motorcycle (2-wheeler + rider entity)
+                            det["class_name"] = "motorcycle"
+                            det["class_id"] = 3
+                            processed_list.append(det)
+                        elif ar >= 1.70:
+                            # Valid true pedestrian
+                            det["class_name"] = "person"
+                            det["class_id"] = 0
+                            processed_list.append(det)
+                        elif conf < 0.40:
+                            # Low confidence non-human static artifact, skip
+                            continue
+                        else:
+                            det["class_name"] = "motorcycle"
+                            det["class_id"] = 3
+                            processed_list.append(det)
+
+                    # 3. Auto-Rickshaw & Vehicle Disambiguation
+                    elif canon in ("TRUCK", "CAR", "OTHER_VEHICLE"):
+                        if 0.82 <= ar <= 1.50 and 1200 <= area <= 28000 and canon == "TRUCK":
+                            det["class_name"] = "auto_rickshaw"
+                            det["class_id"] = 80
+                        elif canon == "TRUCK" and area < 8000:
+                            det["class_name"] = "car"
+                            det["class_id"] = 2
+                        processed_list.append(det)
+                    else:
+                        processed_list.append(det)
+
+                return processed_list
 
             except Exception as inference_err:
                 logger.error(f"Inference error in detect_frame: {inference_err}")
