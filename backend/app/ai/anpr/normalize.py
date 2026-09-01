@@ -96,6 +96,12 @@ def disambiguate_plate(raw_plate: str) -> str:
     # Standard Indian Plate Syntax (6-11 characters, e.g., GJ05AB1234, GJ1A1234)
     if 6 <= n <= 11:
         chars = list(cleaned)
+        # 0. Common state prefix OCR errors (e.g. 6J -> GJ, G1 -> GJ, C1 -> GJ)
+        if chars[0] in ("6", "C") and chars[1] == "J":
+            chars[0] = "G"
+        elif chars[0] == "G" and chars[1] in ("1", "I", "T"):
+            chars[1] = "J"
+
         # 1. First 2 positions are State Letters (e.g. GJ)
         for i in range(min(2, n)):
             if chars[i] in DIGIT_TO_CHAR:

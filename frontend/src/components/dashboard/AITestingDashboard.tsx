@@ -302,6 +302,7 @@ export const AITestingDashboard: React.FC = () => {
   const recentDetections = rawDetections.filter((ev) => {
     if (feedFilter === 'ALL') return true;
     if (feedFilter === 'CARS') return ev.object_class === 'CAR' || ev.vehicle_type?.toLowerCase() === 'car';
+    if (feedFilter === 'AUTOS') return ev.object_class === 'AUTO_RICKSHAW' || ev.vehicle_type?.toLowerCase().includes('rickshaw');
     if (feedFilter === 'BUSES') return ev.object_class === 'BUS' || ev.vehicle_type?.toLowerCase() === 'bus';
     if (feedFilter === 'TRUCKS') return ev.object_class === 'TRUCK' || ev.vehicle_type?.toLowerCase() === 'truck';
     if (feedFilter === 'MOTORCYCLES') return ev.object_class === 'MOTORCYCLE' || ev.vehicle_type?.toLowerCase() === 'motorcycle';
@@ -1390,7 +1391,7 @@ export const AITestingDashboard: React.FC = () => {
 
           {/* Filter Bar */}
           <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-            {['ALL', 'CARS', 'BUSES', 'TRUCKS', 'MOTORCYCLES', 'PERSONS', 'PLATES'].map((flt) => (
+            {['ALL', 'CARS', 'AUTOS', 'BUSES', 'TRUCKS', 'MOTORCYCLES', 'PERSONS', 'PLATES'].map((flt) => (
               <button
                 key={flt}
                 onClick={() => setFeedFilter(flt)}
@@ -1457,6 +1458,7 @@ export const AITestingDashboard: React.FC = () => {
                 .map((ev, idx) => {
                   const isPlate = Boolean(ev.license_plate && ev.object_class === ev.license_plate);
                   const isCar = ev.object_class === 'CAR' || ev.vehicle_type?.toLowerCase() === 'car';
+                  const isAutoRickshaw = ev.object_class === 'AUTO_RICKSHAW' || ev.vehicle_type?.toLowerCase().includes('rickshaw');
                   const isBus = ev.object_class === 'BUS' || ev.vehicle_type?.toLowerCase() === 'bus';
                   const isTruck = ev.object_class === 'TRUCK' || ev.vehicle_type?.toLowerCase() === 'truck';
                   const isMotorcycle = ev.object_class === 'MOTORCYCLE' || ev.vehicle_type?.toLowerCase() === 'motorcycle';
@@ -1477,6 +1479,8 @@ export const AITestingDashboard: React.FC = () => {
                         fontSize: '12px',
                         borderLeft: isPlate
                           ? '4px solid #ef4444'
+                          : isAutoRickshaw
+                          ? '4px solid #38bdf8'
                           : isCar
                           ? '4px solid #10b981'
                           : isBus
@@ -1504,6 +1508,8 @@ export const AITestingDashboard: React.FC = () => {
                           >
                             PLATE
                           </span>
+                        ) : isAutoRickshaw ? (
+                          <Car size={14} style={{ color: '#38bdf8' }} />
                         ) : isCar ? (
                           <Car size={14} style={{ color: '#10b981' }} />
                         ) : isBus ? (

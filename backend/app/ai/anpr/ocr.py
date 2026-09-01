@@ -42,7 +42,9 @@ def preprocess_plate_image(plate_crop: np.ndarray) -> List[np.ndarray]:
     Generate enhanced variations of the plate crop for optimal OCR extraction:
     1. Rescaled BGR image
     2. High-contrast CLAHE grayscale
-    3. Bilateral filtered / Otsu thresholded image
+    3. Bilateral filtered + Adaptive Gaussian thresholded image
+    4. Morphological Black-Hat/Top-Hat character edge enhancement
+    5. Otsu binarization
     """
     if plate_crop is None or plate_crop.size == 0:
         return []
@@ -53,10 +55,10 @@ def preprocess_plate_image(plate_crop: np.ndarray) -> List[np.ndarray]:
 
     variants = []
 
-    # 1. Scale up if crop is small (target height ~80-120px)
+    # 1. Scale up if crop is small (target height ~100-140px for optimal OCR)
     scale = 1.0
-    if h < 80:
-        scale = max(1.5, min(4.0, 100.0 / h))
+    if h < 100:
+        scale = max(1.5, min(4.5, 120.0 / h))
         new_w = int(w * scale)
         new_h = int(h * scale)
         base = cv2.resize(plate_crop, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
@@ -65,13 +67,33 @@ def preprocess_plate_image(plate_crop: np.ndarray) -> List[np.ndarray]:
     variants.append(base)
 
     # 2. CLAHE Contrast Enhanced Grayscale
+    gray = None
     try:
         gray = cv2.cvtColor(base, cv2.COLOR_BGR2GRAY) if len(base.shape) == 3 else base.copy()
-        clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
         enhanced_gray = clahe.apply(gray)
         variants.append(enhanced_gray)
     except Exception:
         pass
+
+    # 3. Bilateral Filtered (Noise removal while keeping sharp character edges)
+    if gray is not None:
+        try:
+            denoised = cv2.bilateralFilter(gray, d=7, sigmaColor=75, sigmaSpace=75)
+            variants.append(denoised)
+
+            # 4. Adaptive Thresholding
+            thresh = cv2.adaptiveThreshold(
+                denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 15, 4
+            )
+            variants.append(thresh)
+
+            # 5. Morphological Top-Hat (Isolate bright characters on dark plate)
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+            tophat = cv2.morphologyEx(gray, cv2.MORPH_TOPHAT, kernel)
+            variants.append(tophat)
+        except Exception:
+            pass
 
     return variants
 

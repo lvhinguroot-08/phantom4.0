@@ -166,10 +166,48 @@ class YOLO26Detector:
                         y1 = max(0, min(h, int(round(xyxy[1]))))
                         x2 = max(0, min(w, int(round(xyxy[2]))))
                         y2 = max(0, min(h, int(round(xyxy[3]))))
+                        bw = x2 - x1
+                        bh = y2 - y1
+
+                        if bw < 14 or bh < 14:
+                            continue  # Filter sub-pixel / tiny noise artifacts
+
+                        # --- Intelligent Validation & False-Positive Suppression ---
+                        aspect_ratio = bh / float(bw) if bw > 0 else 1.0
+                        box_area = bw * bh
+
+                        # 1. Person Validation (Suppress signposts, lamp poles, thin vertical artifacts)
+                        if clean_name in ("person", "pedestrian"):
+                            # A real human in CCTV has aspect ratio between 1.3 and 4.2
+                            if aspect_ratio > 4.5 or aspect_ratio < 0.9:
+                                continue  # Reject ultra-thin poles or wide non-human objects
+                            # In low-light / night conditions, require higher confidence for pedestrians
+                            if conf < 0.40 and (aspect_ratio < 1.4 or aspect_ratio > 3.8):
+                                continue
+
+                        # 2. Vehicle Disambiguation & Auto-Rickshaw Identification
+                        refined_name = clean_name
+                        canon = normalize_class_name(clean_name)
+
+                        if canon in ("TRUCK", "CAR", "MOTORCYCLE", "OTHER_VEHICLE"):
+                            # Auto-Rickshaw / 3-Wheeler detection (typical Indian urban traffic)
+                            # Compact boxy footprint: aspect ratio ~0.9 to 1.45, moderate area
+                            if 0.85 <= aspect_ratio <= 1.45 and 1500 <= box_area <= 28000:
+                                # Check if classified as truck despite small footprint
+                                if canon == "TRUCK" and box_area < 25000:
+                                    refined_name = "auto_rickshaw"
+                                    cls_id = 80  # custom id for auto rickshaw
+                            elif canon == "TRUCK" and box_area < 8000:
+                                # A truck bounding box smaller than 8000px in 1080p is usually a car or rickshaw
+                                refined_name = "car"
+                                cls_id = 2
+                            elif canon == "BUS" and aspect_ratio > 1.8:
+                                # Buses are wide, not ultra-tall
+                                refined_name = "truck" if box_area > 30000 else "car"
 
                         results_list.append({
                             "class_id": cls_id,
-                            "class_name": clean_name,
+                            "class_name": refined_name,
                             "confidence": round(conf, 4),
                             "bbox": {
                                 "x1": x1,
