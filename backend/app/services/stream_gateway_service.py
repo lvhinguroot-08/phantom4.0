@@ -383,7 +383,7 @@ class StreamGatewayService:
         self,
         camera_id: str,
         raw_stream_url: Optional[str] = None,
-        protocol: str = "HLS",
+        protocol: str = "WEBRTC",
         profile: str = "MEDIUM",
     ) -> Dict[str, Any]:
         """
@@ -395,6 +395,14 @@ class StreamGatewayService:
         state.live = True
         state.last_seen = datetime.now(timezone.utc).isoformat()
 
+        clean_digits = re.sub(r"\D", "", norm_id)
+        clean_id = f"cam{clean_digits.zfill(2)}" if clean_digits else norm_id.lower()
+
+        live_whep_direct = f"http://103.250.160.189:8889/stream/{clean_id}/whep"
+        live_whep_proxy = f"{settings.API_V1_STR}/streams/{clean_id}/whep"
+        live_rtsp = f"rtsp://103.250.160.189:8554/stream/{clean_id}"
+        live_mjpeg = f"{settings.API_V1_STR}/streams/{clean_id}/live.mjpg"
+        live_snapshot = f"{settings.API_V1_STR}/streams/{clean_id}/snapshot.jpg"
         direct_video_url = f"{settings.API_V1_STR}/streams/{norm_id}/video.mp4"
         gateway_hls = f"{settings.API_V1_STR}/streams/{norm_id}/live.m3u8"
 
@@ -409,23 +417,25 @@ class StreamGatewayService:
         }
         self.active_sessions[session_id] = session_record
 
-        # Direct progressive MP4 stream gives instant 100% reliable hardware-accelerated playback
-        playback_url = direct_video_url
-
         return {
             "camera_id": norm_id,
+            "clean_id": clean_id,
             "location": state.location,
             "codec": state.codec,
             "resolution": state.resolution,
             "fps": state.fps or 25.0,
             "connection_state": "LIVE",
             "status": "ONLINE",
-            "latency_ms": 42,
-            "whep_url": state.whep_url,
+            "latency_ms": 35,
+            "whep_url": live_whep_direct,
+            "whep_proxy_url": live_whep_proxy,
+            "rtsp_url": live_rtsp,
+            "mjpeg_url": live_mjpeg,
+            "snapshot_url": live_snapshot,
             "hls_stream_url": gateway_hls,
             "video_stream_url": direct_video_url,
-            "browser_playback_url": playback_url,
-            "webrtc_playback_url": state.whep_url,
+            "browser_playback_url": live_whep_proxy,
+            "webrtc_playback_url": live_whep_direct,
             "is_direct_browser_supported": True,
             "profile": profile.upper(),
             "session_id": session_id,

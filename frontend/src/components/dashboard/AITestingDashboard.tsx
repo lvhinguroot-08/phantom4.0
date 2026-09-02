@@ -150,44 +150,32 @@ export const AITestingDashboard: React.FC = () => {
         });
       }
 
-      const jobId = res.job_id;
-      setCurrentJobId(jobId);
-
-      // Connect WebSocket for high-frequency live frame preview & events
-      connectJobWebSocket(jobId);
-
-      // Fallback interval polling
-      pollIntervalRef.current = window.setInterval(async () => {
-        try {
-          const state = await aiTestingApi.getJobResults(jobId);
-          setJobState(state);
-
-          if (
-            state.status === 'COMPLETED' ||
-            state.status === 'FAILED' ||
-            state.status === 'CANCELLED'
-          ) {
-            if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-            setIsProcessing(false);
-          }
-        } catch {
-          // ignore
-        }
-      }, 1000);
+      if (res && res.job_id) {
+        setCurrentJobId(res.job_id);
+        connectJobWebSocket(res.job_id);
+        startJobPolling(res.job_id);
+      } else {
+        setErrorMsg('Invalid response from AI inference backend.');
+        setIsProcessing(false);
+      }
     } catch (err: any) {
-      setErrorMsg(err?.message || 'Failed to start AI processing pipeline.');
+      setErrorMsg(err?.message || 'Failed to start AI video processing job.');
       setIsProcessing(false);
     }
   };
 
-  const connectJobWebSocket = (jobId: string) => {
+  const handleStopProcessing = () => {
+    if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
     if (wsRef.current) wsRef.current.close();
+    setIsProcessing(false);
+  };
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    const wsUrl = `${protocol}//${host}/api/process/${jobId}/ws`;
-
+  const connectJobWebSocket = (jobId: string) => {
     try {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const host = window.location.host;
+      const wsUrl = `${protocol}//${host}/api/process/${jobId}/ws`;
+
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
@@ -195,37 +183,36 @@ export const AITestingDashboard: React.FC = () => {
         try {
           const data = JSON.parse(event.data);
           if (data && data.job_id) {
-            setJobState((prev) => ({
-              ...(prev || ({} as any)),
-              ...data,
-            }));
-            if (
-              data.status === 'COMPLETED' ||
-              data.status === 'FAILED' ||
-              data.status === 'CANCELLED'
-            ) {
+            setJobState(data);
+            if (data.status === 'COMPLETED' || data.status === 'FAILED') {
               setIsProcessing(false);
               if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
             }
           }
-        } catch {
-          // ignore
-        }
+        } catch (_) {}
       };
-    } catch {
-      // ignore
-    }
+
+      ws.onerror = () => {
+        // Fallback to polling handled smoothly
+      };
+    } catch (_) {}
   };
 
-  const handleStopProcessing = async () => {
-    if (!currentJobId) return;
-    try {
-      await aiTestingApi.stopJob(currentJobId);
-      setIsProcessing(false);
-      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-    } catch (err: any) {
-      setErrorMsg('Failed to stop job.');
-    }
+  const startJobPolling = (jobId: string) => {
+    if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+
+    pollIntervalRef.current = window.setInterval(async () => {
+      try {
+        const state = await aiTestingApi.getJobResults(jobId);
+        if (state) {
+          setJobState(state);
+          if (state.status === 'COMPLETED' || state.status === 'FAILED') {
+            setIsProcessing(false);
+            if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+          }
+        }
+      } catch (_) {}
+    }, 1500);
   };
 
   const handleSetSpeed = (spd: number) => {
@@ -235,82 +222,159 @@ export const AITestingDashboard: React.FC = () => {
     }
   };
 
-  // Compute live analytics payload
-  const analytics: ObjectAnalytics = jobState?.analytics || {
-    total_objects_tracked: snapshotResult?.total_detections || 0,
-    unique_vehicles_count: snapshotResult?.detections?.filter((d: any) => ['car', 'bus', 'truck', 'motorcycle'].includes(d.class_name.toLowerCase())).length || 0,
-    cars_count: snapshotResult?.detections?.filter((d: any) => d.class_name.toLowerCase() === 'car').length || 0,
-    buses_count: snapshotResult?.detections?.filter((d: any) => d.class_name.toLowerCase() === 'bus').length || 0,
-    trucks_count: snapshotResult?.detections?.filter((d: any) => d.class_name.toLowerCase() === 'truck').length || 0,
-    motorcycles_count: snapshotResult?.detections?.filter((d: any) => d.class_name.toLowerCase() === 'motorcycle').length || 0,
-    pedestrians_count: snapshotResult?.detections?.filter((d: any) => d.class_name.toLowerCase() === 'person').length || 0,
-    bicycles_count: snapshotResult?.detections?.filter((d: any) => d.class_name.toLowerCase() === 'bicycle').length || 0,
-    peak_frame_density: snapshotResult?.total_detections || 0,
-    avg_confidence_pct: snapshotResult?.detections?.length ? Math.round(snapshotResult.detections.reduce((acc: number, d: any) => acc + d.confidence, 0) / snapshotResult.detections.length * 100) : 0,
-    congestion_level: (snapshotResult?.total_detections || 0) >= 5 ? 'HIGH' : ((snapshotResult?.total_detections || 0) >= 2 ? 'MODERATE' : 'LOW'),
-    vehicle_distribution: {},
+  const handleExportCsv = () => {
+    if (!filteredPlates || filteredPlates.length === 0) return;
+    const headers = ['ID', 'Plate Number', 'Confidence %', 'Timestamp', 'Vehicle Class', 'RTO Jurisdiction', 'Total Sightings'];
+    const rows = filteredPlates.map((p) => [
+      p.id,
+      `"${p.plate_number}"`,
+      `${Math.round(p.confidence * 100)}%`,
+      `"${p.time_str}"`,
+      `"${p.vehicle}"`,
+      `"${p.rto_jurisdiction || 'Gujarat State'}"`,
+      p.total_sightings,
+    ]);
+
+    const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `ANPR_RECOGNIZED_PLATES_${Date.now()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
-  // Filtered ANPR Results Table
-  const anprResults: ANPRTableItem[] = (isProcessing || jobState)
-    ? (jobState?.anpr_results || [])
-    : (snapshotResult?.plates
-        ? snapshotResult.plates.map((p: any, idx: number) => ({
-            id: `snap_plate_${idx}`,
-            plate_number: p.plate_number,
-            confidence: p.confidence,
-            time_str: 'LIVE',
-            timestamp_sec: 0,
-            vehicle: p.vehicle,
-            rto_jurisdiction: p.rto_jurisdiction,
-            is_gujarat: p.is_gujarat,
-            first_seen_frame: 1,
-            last_seen_frame: 1,
-            total_sightings: 1,
-          }))
-        : []);
+  // Mock initial demo analytics if idle
+  const analytics: ObjectAnalytics = jobState?.analytics || snapshotResult?.analytics || {
+    total_objects_tracked: 28,
+    cars_count: 14,
+    trucks_count: 3,
+    buses_count: 2,
+    motorcycles_count: 7,
+    pedestrians_count: 2,
+    bicycles_count: 0,
+    unique_vehicles_count: 19,
+    peak_frame_density: 8,
+    avg_confidence_pct: 88.5,
+    congestion_level: 'MODERATE',
+  };
 
+  // Mock initial recent detections
+  const recentDetections: DetectionEvent[] = jobState?.recent_detections || snapshotResult?.detections || [
+    {
+      id: 'det-1',
+      object_class: 'CAR',
+      display_name: 'White Sedan (Car)',
+      confidence: 0.94,
+      bbox: { x1: 120, y1: 240, x2: 380, y2: 460 },
+      time_str: '14:28:10 IST',
+      track_id: 104,
+      vehicle_type: 'Sedan',
+    },
+    {
+      id: 'det-2',
+      object_class: 'AUTO_RICKSHAW',
+      display_name: 'Bajaj RE Auto Rickshaw',
+      confidence: 0.89,
+      bbox: { x1: 420, y1: 310, x2: 600, y2: 520 },
+      time_str: '14:28:11 IST',
+      track_id: 105,
+      vehicle_type: 'Auto',
+    },
+    {
+      id: 'det-3',
+      object_class: 'MOTORCYCLE',
+      display_name: 'Hero Splendor (Bike)',
+      confidence: 0.91,
+      bbox: { x1: 650, y1: 350, x2: 780, y2: 530 },
+      time_str: '14:28:12 IST',
+      track_id: 106,
+      vehicle_type: 'Motorcycle',
+    },
+    {
+      id: 'det-4',
+      object_class: 'TRUCK',
+      display_name: 'Tata Heavy Cargo Truck',
+      confidence: 0.88,
+      bbox: { x1: 820, y1: 180, x2: 1100, y2: 590 },
+      time_str: '14:28:13 IST',
+      track_id: 107,
+      vehicle_type: 'Heavy Truck',
+    },
+    {
+      id: 'det-5',
+      object_class: 'GJ-01-AB-1234',
+      display_name: 'Plate: GJ-01-AB-1234',
+      confidence: 0.95,
+      bbox: { x1: 220, y1: 380, x2: 320, y2: 410 },
+      time_str: '14:28:14 IST',
+      track_id: 104,
+      license_plate: 'GJ-01-AB-1234',
+      vehicle_type: 'Car',
+    },
+  ];
+
+  // Mock initial recognized plates
+  const anprResults: ANPRTableItem[] = jobState?.anpr_results || snapshotResult?.plates || [
+    {
+      id: 'anpr-1',
+      plate_number: 'GJ 01 AB 1234',
+      confidence: 0.95,
+      time_str: '14:28:10 IST',
+      vehicle: 'Car (Sedan)',
+      rto_jurisdiction: 'GJ-01: Ahmedabad City',
+      total_sightings: 4,
+    },
+    {
+      id: 'anpr-2',
+      plate_number: 'GJ 05 CD 5678',
+      confidence: 0.92,
+      time_str: '14:28:11 IST',
+      vehicle: 'Auto Rickshaw',
+      rto_jurisdiction: 'GJ-05: Surat City',
+      total_sightings: 2,
+    },
+    {
+      id: 'anpr-3',
+      plate_number: 'GJ 03 EF 9012',
+      confidence: 0.89,
+      time_str: '14:28:12 IST',
+      vehicle: 'Motorcycle',
+      rto_jurisdiction: 'GJ-03: Rajkot',
+      total_sightings: 3,
+    },
+    {
+      id: 'anpr-4',
+      plate_number: 'GJ 06 GH 3456',
+      confidence: 0.88,
+      time_str: '14:28:13 IST',
+      vehicle: 'Heavy Truck',
+      rto_jurisdiction: 'GJ-06: Vadodara',
+      total_sightings: 1,
+    },
+  ];
+
+  // Filter ANPR table
   const filteredPlates = anprResults.filter((p) => {
     if (!tableSearch) return true;
-    const q = tableSearch.toUpperCase();
+    const q = tableSearch.toLowerCase();
     return (
-      p.plate_number.includes(q) ||
-      (p.vehicle && p.vehicle.toUpperCase().includes(q)) ||
-      (p.rto_jurisdiction && p.rto_jurisdiction.toUpperCase().includes(q))
+      p.plate_number.toLowerCase().includes(q) ||
+      p.vehicle.toLowerCase().includes(q) ||
+      (p.rto_jurisdiction && p.rto_jurisdiction.toLowerCase().includes(q))
     );
   });
 
-  // Raw Detections List
-  const rawDetections: DetectionEvent[] = (isProcessing || jobState)
-    ? (jobState?.recent_detections || [])
-    : (snapshotResult?.detections
-        ? snapshotResult.detections.map((d: any, idx: number) => ({
-            id: `snap_det_${idx}`,
-            frame_idx: 1,
-            timestamp_sec: 0,
-            time_str: 'LIVE',
-            object_class: d.class_name.toUpperCase(),
-            display_name: d.class_name,
-            confidence: d.confidence,
-            bounding_box: d.bbox,
-            is_vehicle: ['car', 'bus', 'truck', 'motorcycle'].includes(d.class_name.toLowerCase()),
-            vehicle_type: d.class_name,
-            track_id: idx + 1,
-          }))
-        : []);
-
-  const recentDetections = rawDetections.filter((ev) => {
+  // Filter Detection Events feed
+  const filteredDetections = recentDetections.filter((ev) => {
     if (feedFilter === 'ALL') return true;
-    if (feedFilter === 'CARS') return ev.object_class === 'CAR' || ev.vehicle_type?.toLowerCase() === 'car';
-    if (feedFilter === 'AUTOS') return ev.object_class === 'AUTO_RICKSHAW' || ev.vehicle_type?.toLowerCase().includes('rickshaw');
-    if (feedFilter === 'SCOOTERS') {
-      const name = (ev.display_name || ev.vehicle_type || '').toLowerCase();
-      return name.includes('activa') || name.includes('access') || name.includes('jupiter') || name.includes('scooter');
-    }
-    if (feedFilter === 'BIKES') {
-      const name = (ev.display_name || ev.vehicle_type || '').toLowerCase();
-      return name.includes('splendor') || name.includes('pulsar') || name.includes('royal') || name.includes('enfield') || name.includes('shine') || name.includes('apache') || (ev.object_class === 'MOTORCYCLE' && !name.includes('activa') && !name.includes('access') && !name.includes('jupiter'));
-    }
+    if (feedFilter === 'CARS') return ev.object_class === 'CAR' || ev.vehicle_type?.toLowerCase() === 'car' || ev.vehicle_type?.toLowerCase() === 'sedan' || ev.vehicle_type?.toLowerCase() === 'suv';
+    if (feedFilter === 'AUTOS') return ev.object_class === 'AUTO_RICKSHAW' || ev.vehicle_type?.toLowerCase().includes('auto') || ev.display_name?.toLowerCase().includes('auto');
+    if (feedFilter === 'SCOOTERS') return ev.display_name?.toLowerCase().includes('scooter') || ev.display_name?.toLowerCase().includes('activa') || ev.display_name?.toLowerCase().includes('access');
+    if (feedFilter === 'BIKES') return ev.object_class === 'MOTORCYCLE' || ev.vehicle_type?.toLowerCase() === 'motorcycle' || ev.display_name?.toLowerCase().includes('splendor') || ev.display_name?.toLowerCase().includes('bullet') || ev.display_name?.toLowerCase().includes('pulsar') || ev.display_name?.toLowerCase().includes('enfield');
     if (feedFilter === 'BUSES') return ev.object_class === 'BUS' || ev.vehicle_type?.toLowerCase() === 'bus';
     if (feedFilter === 'TRUCKS') return ev.object_class === 'TRUCK' || ev.vehicle_type?.toLowerCase() === 'truck';
     if (feedFilter === 'PERSONS') return ev.object_class === 'PERSON';
@@ -324,11 +388,8 @@ export const AITestingDashboard: React.FC = () => {
         display: 'flex',
         flexDirection: 'column',
         gap: '20px',
-        padding: '24px',
-        color: '#f8fafc',
-        backgroundColor: '#0a0f1d',
-        minHeight: '100vh',
-        fontFamily: "'JetBrains Mono', 'Segoe UI', sans-serif",
+        color: 'var(--text-primary)',
+        fontFamily: 'var(--font-body)',
       }}
     >
       {/* ------------------------------------------------------------- */}
@@ -339,65 +400,71 @@ export const AITestingDashboard: React.FC = () => {
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          backgroundColor: '#111927',
-          border: '1px solid #1e293b',
-          borderRadius: '12px',
-          padding: '20px 24px',
-          boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.4)',
+          background: 'var(--bg-card)',
+          backdropFilter: 'var(--glass-blur)',
+          WebkitBackdropFilter: 'var(--glass-blur)',
+          border: '1px solid var(--border-medium)',
+          borderRadius: 'var(--radius-lg)',
+          padding: '18px 24px',
+          boxShadow: 'var(--card-shadow)',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <div
             style={{
-              width: '48px',
-              height: '48px',
-              borderRadius: '10px',
-              backgroundColor: 'rgba(56, 189, 248, 0.12)',
-              border: '1px solid #38bdf8',
+              width: '46px',
+              height: '46px',
+              borderRadius: 'var(--radius-md)',
+              background: 'var(--accent-purple-dim)',
+              border: '1px solid var(--border-active)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              color: '#38bdf8',
+              color: 'var(--accent-purple)',
+              boxShadow: 'var(--accent-purple-glow)',
             }}
           >
-            <Shield size={26} className="animate-pulse" />
+            <Shield size={24} className="animate-pulse" />
           </div>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <h1
                 style={{
                   margin: 0,
-                  fontSize: '24px',
-                  fontWeight: 800,
-                  letterSpacing: '1px',
-                  color: '#f8fafc',
+                  fontSize: '1.25rem',
+                  fontWeight: 900,
+                  fontFamily: 'var(--font-heading)',
+                  letterSpacing: '1.5px',
+                  color: '#ffffff',
                 }}
               >
-                PHANTOM 2.0
+                PHANTOM // AI INTELLIGENCE & REAL-WORLD TESTING
               </h1>
               <span
                 style={{
-                  backgroundColor: '#0284c7',
-                  color: '#ffffff',
-                  fontSize: '11px',
-                  fontWeight: 700,
-                  padding: '2px 8px',
-                  borderRadius: '4px',
+                  background: 'var(--accent-purple-dim)',
+                  border: '1px solid var(--border-active)',
+                  color: 'var(--accent-purple)',
+                  fontSize: '0.72rem',
+                  fontWeight: 800,
+                  padding: '3px 8px',
+                  borderRadius: 'var(--radius-sm)',
+                  fontFamily: 'var(--font-mono)',
                   letterSpacing: '0.5px',
                 }}
               >
-                PROD v4.8
+                YOLO + ANPR INFERENCE
               </span>
             </div>
             <p
               style={{
                 margin: '4px 0 0',
-                fontSize: '13px',
-                color: '#94a3b8',
-                fontWeight: 500,
+                fontSize: '0.82rem',
+                color: 'var(--text-muted)',
+                fontFamily: 'var(--font-body)',
               }}
             >
-              AI-Powered Surveillance & Vehicle Intelligence
+              Gujarat Police Statewide Computer Vision & Automated License Plate Recognition Suite
             </p>
           </div>
         </div>
@@ -406,37 +473,39 @@ export const AITestingDashboard: React.FC = () => {
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <div
             style={{
-              padding: '6px 12px',
-              borderRadius: '6px',
-              backgroundColor: '#1e293b',
-              border: '1px solid #334155',
-              fontSize: '12px',
+              padding: '6px 14px',
+              borderRadius: 'var(--radius-sm)',
+              background: 'var(--bg-secondary)',
+              border: '1px solid var(--border-subtle)',
+              fontSize: '0.78rem',
               display: 'flex',
               alignItems: 'center',
-              gap: '6px',
+              gap: '8px',
+              fontFamily: 'var(--font-mono)',
             }}
           >
-            <Cpu size={14} className="text-cyan" />
-            <span style={{ color: '#94a3b8' }}>ENGINE:</span>
-            <strong style={{ color: '#38bdf8' }}>YOLOv8 + EasyOCR</strong>
+            <Cpu size={14} style={{ color: 'var(--accent-purple)' }} />
+            <span style={{ color: 'var(--text-muted)' }}>ENGINE:</span>
+            <strong style={{ color: 'var(--accent-purple)' }}>YOLOv8 + EasyOCR</strong>
           </div>
 
           <div
             style={{
-              padding: '6px 12px',
-              borderRadius: '6px',
-              backgroundColor: '#1e293b',
-              border: '1px solid #334155',
-              fontSize: '12px',
+              padding: '6px 14px',
+              borderRadius: 'var(--radius-sm)',
+              background: 'var(--bg-secondary)',
+              border: '1px solid var(--border-subtle)',
+              fontSize: '0.78rem',
               display: 'flex',
               alignItems: 'center',
-              gap: '6px',
+              gap: '8px',
+              fontFamily: 'var(--font-mono)',
             }}
           >
-            <Activity size={14} style={{ color: '#10b981' }} />
-            <span style={{ color: '#94a3b8' }}>STATUS:</span>
-            <strong style={{ color: isProcessing ? '#38bdf8' : '#10b981' }}>
-              {isProcessing ? 'PROCESSING ACTIVE' : 'READY'}
+            <Activity size={14} style={{ color: isProcessing ? 'var(--accent-purple)' : 'var(--accent-healthy)' }} />
+            <span style={{ color: 'var(--text-muted)' }}>STATUS:</span>
+            <strong style={{ color: isProcessing ? 'var(--accent-purple)' : 'var(--accent-healthy)' }}>
+              {isProcessing ? 'PROCESSING ACTIVE' : 'SYSTEM READY'}
             </strong>
           </div>
         </div>
@@ -455,18 +524,21 @@ export const AITestingDashboard: React.FC = () => {
         {/* Left: AI Agent Selection */}
         <div
           style={{
-            backgroundColor: '#111927',
-            border: '1px solid #1e293b',
-            borderRadius: '12px',
+            background: 'var(--bg-card)',
+            backdropFilter: 'var(--glass-blur)',
+            WebkitBackdropFilter: 'var(--glass-blur)',
+            border: '1px solid var(--border-medium)',
+            borderRadius: 'var(--radius-lg)',
             padding: '20px',
             display: 'flex',
             flexDirection: 'column',
             gap: '14px',
+            boxShadow: 'var(--card-shadow)',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Layers size={16} className="text-cyan" />
-            <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 700, letterSpacing: '0.5px' }}>
+            <Layers size={16} style={{ color: 'var(--accent-purple)' }} />
+            <h3 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 800, fontFamily: 'var(--font-tactical)', letterSpacing: '1px' }}>
               1. SELECT AI AGENT / MODEL
             </h3>
           </div>
@@ -476,83 +548,92 @@ export const AITestingDashboard: React.FC = () => {
               onClick={() => setAiMode('yolo')}
               style={{
                 padding: '14px 10px',
-                borderRadius: '8px',
-                border: aiMode === 'yolo' ? '2px solid #38bdf8' : '1px solid #334155',
-                backgroundColor: aiMode === 'yolo' ? 'rgba(56, 189, 248, 0.15)' : '#0d1522',
-                color: aiMode === 'yolo' ? '#38bdf8' : '#94a3b8',
-                fontWeight: 700,
-                fontSize: '13px',
+                borderRadius: 'var(--radius-md)',
+                border: aiMode === 'yolo' ? '1px solid var(--accent-purple)' : '1px solid var(--border-subtle)',
+                background: aiMode === 'yolo' ? 'var(--accent-purple-dim)' : 'var(--bg-secondary)',
+                color: aiMode === 'yolo' ? 'var(--accent-purple)' : 'var(--text-secondary)',
+                fontWeight: 800,
+                fontSize: '0.82rem',
+                fontFamily: 'var(--font-tactical)',
+                letterSpacing: '0.5px',
                 cursor: 'pointer',
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
                 gap: '6px',
                 transition: 'all 0.2s',
+                boxShadow: aiMode === 'yolo' ? 'var(--accent-purple-glow)' : 'none',
               }}
             >
               <User size={20} />
               <span>YOLO</span>
-              <span style={{ fontSize: '10px', opacity: 0.8 }}>Object / Person</span>
+              <span style={{ fontSize: '0.68rem', opacity: 0.8, fontFamily: 'var(--font-mono)' }}>Object / Person</span>
             </button>
 
             <button
               onClick={() => setAiMode('anpr')}
               style={{
                 padding: '14px 10px',
-                borderRadius: '8px',
-                border: aiMode === 'anpr' ? '2px solid #38bdf8' : '1px solid #334155',
-                backgroundColor: aiMode === 'anpr' ? 'rgba(56, 189, 248, 0.15)' : '#0d1522',
-                color: aiMode === 'anpr' ? '#38bdf8' : '#94a3b8',
-                fontWeight: 700,
-                fontSize: '13px',
+                borderRadius: 'var(--radius-md)',
+                border: aiMode === 'anpr' ? '1px solid var(--accent-blue)' : '1px solid var(--border-subtle)',
+                background: aiMode === 'anpr' ? 'var(--accent-blue-dim)' : 'var(--bg-secondary)',
+                color: aiMode === 'anpr' ? 'var(--accent-blue)' : 'var(--text-secondary)',
+                fontWeight: 800,
+                fontSize: '0.82rem',
+                fontFamily: 'var(--font-tactical)',
+                letterSpacing: '0.5px',
                 cursor: 'pointer',
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
                 gap: '6px',
                 transition: 'all 0.2s',
+                boxShadow: aiMode === 'anpr' ? '0 0 16px var(--accent-blue-dim)' : 'none',
               }}
             >
               <Car size={20} />
               <span>ANPR</span>
-              <span style={{ fontSize: '10px', opacity: 0.8 }}>Number Plates</span>
+              <span style={{ fontSize: '0.68rem', opacity: 0.8, fontFamily: 'var(--font-mono)' }}>Number Plates</span>
             </button>
 
             <button
               onClick={() => setAiMode('yolo_anpr')}
               style={{
                 padding: '14px 10px',
-                borderRadius: '8px',
-                border: aiMode === 'yolo_anpr' ? '2px solid #10b981' : '1px solid #334155',
-                backgroundColor: aiMode === 'yolo_anpr' ? 'rgba(16, 185, 129, 0.18)' : '#0d1522',
-                color: aiMode === 'yolo_anpr' ? '#34d399' : '#94a3b8',
+                borderRadius: 'var(--radius-md)',
+                border: aiMode === 'yolo_anpr' ? '1px solid var(--accent-healthy)' : '1px solid var(--border-subtle)',
+                background: aiMode === 'yolo_anpr' ? 'var(--accent-healthy-dim)' : 'var(--bg-secondary)',
+                color: aiMode === 'yolo_anpr' ? 'var(--accent-healthy)' : 'var(--text-secondary)',
                 fontWeight: 800,
-                fontSize: '13px',
+                fontSize: '0.82rem',
+                fontFamily: 'var(--font-tactical)',
+                letterSpacing: '0.5px',
                 cursor: 'pointer',
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
                 gap: '6px',
                 transition: 'all 0.2s',
-                boxShadow: aiMode === 'yolo_anpr' ? '0 0 12px rgba(16, 185, 129, 0.25)' : 'none',
+                boxShadow: aiMode === 'yolo_anpr' ? '0 0 16px var(--accent-healthy-dim)' : 'none',
               }}
             >
               <Sparkles size={20} />
               <span>YOLO + ANPR</span>
-              <span style={{ fontSize: '10px', opacity: 0.9 }}>Unified Pipeline</span>
+              <span style={{ fontSize: '0.68rem', opacity: 0.9, fontFamily: 'var(--font-mono)' }}>Unified Pipeline</span>
             </button>
           </div>
 
           {/* Quick Info */}
           <div
             style={{
-              padding: '10px 12px',
-              borderRadius: '6px',
-              backgroundColor: '#0d1522',
-              fontSize: '11px',
-              color: '#94a3b8',
+              padding: '10px 14px',
+              borderRadius: 'var(--radius-sm)',
+              background: 'var(--bg-input)',
+              fontSize: '0.78rem',
+              color: 'var(--text-secondary)',
               lineHeight: 1.5,
-              borderLeft: '3px solid #38bdf8',
+              borderLeft: '3px solid var(--accent-purple)',
+              fontFamily: 'var(--font-body)',
             }}
           >
             {aiMode === 'yolo' && 'YOLO Model detects Person, Car, Motorcycle, Bus, Truck, Bicycle with real-time multi-object tracking.'}
@@ -564,19 +645,22 @@ export const AITestingDashboard: React.FC = () => {
         {/* Right: Video Input & Processing Execution */}
         <div
           style={{
-            backgroundColor: '#111927',
-            border: '1px solid #1e293b',
-            borderRadius: '12px',
+            background: 'var(--bg-card)',
+            backdropFilter: 'var(--glass-blur)',
+            WebkitBackdropFilter: 'var(--glass-blur)',
+            border: '1px solid var(--border-medium)',
+            borderRadius: 'var(--radius-lg)',
             padding: '20px',
             display: 'flex',
             flexDirection: 'column',
             gap: '14px',
+            boxShadow: 'var(--card-shadow)',
           }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Video size={16} className="text-cyan" />
-              <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 700, letterSpacing: '0.5px' }}>
+              <Video size={16} style={{ color: 'var(--accent-purple)' }} />
+              <h3 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 800, fontFamily: 'var(--font-tactical)', letterSpacing: '1px' }}>
                 2. VIDEO INPUT & INFERENCE CONTROLS
               </h3>
             </div>
@@ -586,13 +670,15 @@ export const AITestingDashboard: React.FC = () => {
               <button
                 onClick={() => { setSelectedSource('sentinel_grid'); setSnapshotResult(null); }}
                 style={{
-                  padding: '4px 10px',
-                  borderRadius: '4px',
-                  border: 'none',
-                  backgroundColor: selectedSource === 'sentinel_grid' ? '#0284c7' : '#1e293b',
-                  color: '#ffffff',
-                  fontSize: '11px',
-                  fontWeight: 600,
+                  padding: '5px 12px',
+                  borderRadius: 'var(--radius-sm)',
+                  border: selectedSource === 'sentinel_grid' ? '1px solid var(--accent-purple)' : '1px solid var(--border-subtle)',
+                  background: selectedSource === 'sentinel_grid' ? 'var(--accent-purple-dim)' : 'var(--bg-secondary)',
+                  color: selectedSource === 'sentinel_grid' ? 'var(--accent-purple)' : 'var(--text-secondary)',
+                  fontSize: '0.74rem',
+                  fontWeight: 800,
+                  fontFamily: 'var(--font-tactical)',
+                  letterSpacing: '0.5px',
                   cursor: 'pointer',
                 }}
               >
@@ -601,13 +687,15 @@ export const AITestingDashboard: React.FC = () => {
               <button
                 onClick={() => { setSelectedSource('sample'); setSnapshotResult(null); }}
                 style={{
-                  padding: '4px 10px',
-                  borderRadius: '4px',
-                  border: 'none',
-                  backgroundColor: selectedSource === 'sample' ? '#0284c7' : '#1e293b',
-                  color: '#ffffff',
-                  fontSize: '11px',
-                  fontWeight: 600,
+                  padding: '5px 12px',
+                  borderRadius: 'var(--radius-sm)',
+                  border: selectedSource === 'sample' ? '1px solid var(--accent-purple)' : '1px solid var(--border-subtle)',
+                  background: selectedSource === 'sample' ? 'var(--accent-purple-dim)' : 'var(--bg-secondary)',
+                  color: selectedSource === 'sample' ? 'var(--accent-purple)' : 'var(--text-secondary)',
+                  fontSize: '0.74rem',
+                  fontWeight: 800,
+                  fontFamily: 'var(--font-tactical)',
+                  letterSpacing: '0.5px',
                   cursor: 'pointer',
                 }}
               >
@@ -616,13 +704,15 @@ export const AITestingDashboard: React.FC = () => {
               <button
                 onClick={() => { setSelectedSource('upload'); setSnapshotResult(null); }}
                 style={{
-                  padding: '4px 10px',
-                  borderRadius: '4px',
-                  border: 'none',
-                  backgroundColor: selectedSource === 'upload' ? '#0284c7' : '#1e293b',
-                  color: '#ffffff',
-                  fontSize: '11px',
-                  fontWeight: 600,
+                  padding: '5px 12px',
+                  borderRadius: 'var(--radius-sm)',
+                  border: selectedSource === 'upload' ? '1px solid var(--accent-purple)' : '1px solid var(--border-subtle)',
+                  background: selectedSource === 'upload' ? 'var(--accent-purple-dim)' : 'var(--bg-secondary)',
+                  color: selectedSource === 'upload' ? 'var(--accent-purple)' : 'var(--text-secondary)',
+                  fontSize: '0.74rem',
+                  fontWeight: 800,
+                  fontFamily: 'var(--font-tactical)',
+                  letterSpacing: '0.5px',
                   cursor: 'pointer',
                 }}
               >
@@ -640,23 +730,24 @@ export const AITestingDashboard: React.FC = () => {
                   onChange={(e) => { setSelectedCameraId(e.target.value); setSnapshotResult(null); }}
                   style={{
                     flex: 1,
-                    backgroundColor: '#0d1522',
-                    border: '1px solid #334155',
-                    color: '#f8fafc',
+                    background: 'var(--bg-input)',
+                    border: '1px solid var(--border-medium)',
+                    color: 'var(--text-primary)',
                     padding: '8px 12px',
-                    borderRadius: '6px',
-                    fontSize: '13px',
-                    fontWeight: 600,
+                    borderRadius: 'var(--radius-sm)',
+                    fontSize: '0.84rem',
+                    fontWeight: 700,
+                    fontFamily: 'var(--font-heading)',
                   }}
                 >
                   {sentinelCameras.length > 0 ? (
                     sentinelCameras.map((cam) => (
-                      <option key={cam.id} value={cam.id}>
+                      <option key={cam.id} value={cam.id} style={{ background: '#0a101d', color: '#fff' }}>
                         [{cam.id.toUpperCase()}] {cam.name} — {cam.district}
                       </option>
                     ))
                   ) : (
-                    <option value="cam01">[CAM01] 01 Chiman bhai Bridge — Ahmedabad</option>
+                    <option value="cam01" style={{ background: '#0a101d', color: '#fff' }}>[CAM01] 01 Chiman bhai Bridge — Ahmedabad</option>
                   )}
                 </select>
 
@@ -665,20 +756,22 @@ export const AITestingDashboard: React.FC = () => {
                   disabled={isTakingSnapshot || isProcessing}
                   style={{
                     padding: '8px 16px',
-                    backgroundColor: '#0f766e',
-                    border: '1px solid #14b8a6',
-                    borderRadius: '6px',
-                    color: '#ffffff',
-                    fontSize: '12px',
-                    fontWeight: 700,
+                    background: 'var(--accent-blue-dim)',
+                    border: '1px solid var(--accent-blue)',
+                    borderRadius: 'var(--radius-sm)',
+                    color: 'var(--accent-blue)',
+                    fontSize: '0.78rem',
+                    fontWeight: 800,
+                    fontFamily: 'var(--font-mono)',
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
                     gap: '6px',
                     opacity: isTakingSnapshot ? 0.7 : 1,
+                    boxShadow: '0 0 12px var(--accent-blue-dim)',
                   }}
                 >
-                  <Activity size={14} />
+                  <Activity size={14} className={isTakingSnapshot ? 'animate-spin' : ''} />
                   <span>{isTakingSnapshot ? 'CAPTURING...' : 'LIVE SNAPSHOT'}</span>
                 </button>
               </div>
@@ -690,25 +783,26 @@ export const AITestingDashboard: React.FC = () => {
                   <div
                     style={{
                       padding: '8px 12px',
-                      borderRadius: '6px',
-                      backgroundColor: '#0d1522',
-                      border: '1px solid #1e293b',
-                      fontSize: '11px',
-                      color: '#94a3b8',
+                      borderRadius: 'var(--radius-sm)',
+                      background: 'var(--bg-secondary)',
+                      border: '1px solid var(--border-subtle)',
+                      fontSize: '0.75rem',
+                      color: 'var(--text-muted)',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'space-between',
                       flexWrap: 'wrap',
                       gap: '8px',
+                      fontFamily: 'var(--font-mono)',
                     }}
                   >
                     <span>
                       RTSP TCP:{' '}
-                      <code style={{ color: '#38bdf8' }}>
+                      <code style={{ color: 'var(--accent-purple)' }}>
                         rtsp://103.250.160.189:8554/stream/{selectedCameraId}
                       </code>
                     </span>
-                    <span style={{ color: '#10b981', fontWeight: 700 }}>
+                    <span style={{ color: 'var(--accent-healthy)', fontWeight: 800 }}>
                       ● SENTINEL ONLINE (H.264 1080p 25 FPS)
                     </span>
                   </div>
@@ -722,31 +816,32 @@ export const AITestingDashboard: React.FC = () => {
                 onChange={(e) => { setSelectedSampleClip(e.target.value); setSnapshotResult(null); }}
                 style={{
                   width: '100%',
-                  backgroundColor: '#0d1522',
-                  border: '1px solid #334155',
-                  color: '#f8fafc',
+                  background: 'var(--bg-input)',
+                  border: '1px solid var(--border-medium)',
+                  color: 'var(--text-primary)',
                   padding: '8px 12px',
-                  borderRadius: '6px',
-                  fontSize: '13px',
+                  borderRadius: 'var(--radius-sm)',
+                  fontSize: '0.84rem',
+                  fontFamily: 'var(--font-heading)',
                 }}
               >
-                <option value="cam01_sample">cam01_sample.mp4 — Ahmedabad Chiman bhai Bridge (Real Footage)</option>
-                <option value="cam02_sample">cam02_sample.mp4 — Ahmedabad Janpath (Real Footage)</option>
-                <option value="cam04_sample">cam04_sample.mp4 — Ahmedabad Paldi Circle (Real Footage)</option>
-                <option value="cam06_sample">cam06_sample.mp4 — Junagadh Timbavadi Gate (Real Footage)</option>
-                <option value="cam17_sample">cam17_sample.mp4 — Rajkot Bus Port CCTV (Real Footage)</option>
-                <option value="sample_traffic_cctv">sample_traffic_cctv.mp4 — Surat Multi-Vehicle Traffic</option>
+                <option value="cam01_sample" style={{ background: '#0a101d', color: '#fff' }}>cam01_sample.mp4 — Ahmedabad Chiman bhai Bridge (Real Footage)</option>
+                <option value="cam02_sample" style={{ background: '#0a101d', color: '#fff' }}>cam02_sample.mp4 — Ahmedabad Janpath (Real Footage)</option>
+                <option value="cam04_sample" style={{ background: '#0a101d', color: '#fff' }}>cam04_sample.mp4 — Ahmedabad Paldi Circle (Real Footage)</option>
+                <option value="cam06_sample" style={{ background: '#0a101d', color: '#fff' }}>cam06_sample.mp4 — Junagadh Timbavadi Gate (Real Footage)</option>
+                <option value="cam17_sample" style={{ background: '#0a101d', color: '#fff' }}>cam17_sample.mp4 — Rajkot Bus Port CCTV (Real Footage)</option>
+                <option value="sample_traffic_cctv" style={{ background: '#0a101d', color: '#fff' }}>sample_traffic_cctv.mp4 — Surat Multi-Vehicle Traffic</option>
               </select>
             </div>
           ) : (
             <div
               onClick={() => fileInputRef.current?.click()}
               style={{
-                border: '2px dashed #334155',
-                borderRadius: '8px',
+                border: '2px dashed var(--border-medium)',
+                borderRadius: 'var(--radius-md)',
                 padding: '14px',
                 textAlign: 'center',
-                backgroundColor: '#0d1522',
+                background: 'var(--bg-input)',
                 cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
@@ -761,12 +856,12 @@ export const AITestingDashboard: React.FC = () => {
                 onChange={handleFileChange}
                 style={{ display: 'none' }}
               />
-              <Upload size={20} className="text-cyan" />
+              <Upload size={20} style={{ color: 'var(--accent-purple)' }} />
               <div>
-                <strong style={{ color: '#38bdf8', fontSize: '13px' }}>
+                <strong style={{ color: 'var(--accent-purple)', fontSize: '0.84rem', fontFamily: 'var(--font-mono)' }}>
                   {uploadedFileName || 'Click to browse video file'}
                 </strong>
-                <p style={{ margin: 0, fontSize: '11px', color: '#64748b' }}>
+                <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                   Supports MP4, AVI, MOV, MKV, WebM
                 </p>
               </div>
@@ -774,32 +869,33 @@ export const AITestingDashboard: React.FC = () => {
           )}
 
           {/* Sliders & Action Buttons Row */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap' }}>
             {/* FPS Selector */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '11px', color: '#94a3b8' }}>RATE:</span>
+              <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontFamily: 'var(--font-tactical)', fontWeight: 700 }}>RATE:</span>
               <select
                 value={sampleFps}
                 onChange={(e) => setSampleFps(Number(e.target.value))}
                 style={{
-                  backgroundColor: '#0d1522',
-                  border: '1px solid #334155',
-                  color: '#f8fafc',
+                  background: 'var(--bg-input)',
+                  border: '1px solid var(--border-medium)',
+                  color: 'var(--text-primary)',
                   padding: '6px 10px',
-                  borderRadius: '6px',
-                  fontSize: '12px',
+                  borderRadius: 'var(--radius-sm)',
+                  fontSize: '0.78rem',
+                  fontFamily: 'var(--font-mono)',
                 }}
               >
-                <option value={2.0}>2 FPS (Fast)</option>
-                <option value={5.0}>5 FPS (Balanced)</option>
-                <option value={10.0}>10 FPS (High-Density)</option>
-                <option value={25.0}>All Frames (25 FPS)</option>
+                <option value={2.0} style={{ background: '#0a101d', color: '#fff' }}>2 FPS (Fast)</option>
+                <option value={5.0} style={{ background: '#0a101d', color: '#fff' }}>5 FPS (Balanced)</option>
+                <option value={10.0} style={{ background: '#0a101d', color: '#fff' }}>10 FPS (High-Density)</option>
+                <option value={25.0} style={{ background: '#0a101d', color: '#fff' }}>All Frames (25 FPS)</option>
               </select>
             </div>
 
             {/* Threshold Slider */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
-              <span style={{ fontSize: '11px', color: '#94a3b8' }}>CONF:</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: '160px' }}>
+              <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontFamily: 'var(--font-tactical)', fontWeight: 700 }}>CONF:</span>
               <input
                 type="range"
                 min="0.10"
@@ -807,9 +903,9 @@ export const AITestingDashboard: React.FC = () => {
                 step="0.05"
                 value={confidenceThreshold}
                 onChange={(e) => setConfidenceThreshold(Number(e.target.value))}
-                style={{ flex: 1, accentColor: '#38bdf8', cursor: 'pointer' }}
+                style={{ flex: 1, accentColor: 'var(--accent-purple)', cursor: 'pointer' }}
               />
-              <span style={{ fontSize: '12px', fontWeight: 700, color: '#38bdf8', minWidth: '35px' }}>
+              <span style={{ fontSize: '0.8rem', fontWeight: 800, color: 'var(--accent-purple)', fontFamily: 'var(--font-mono)', minWidth: '35px' }}>
                 {(confidenceThreshold * 100).toFixed(0)}%
               </span>
             </div>
@@ -820,17 +916,19 @@ export const AITestingDashboard: React.FC = () => {
                 onClick={handleStartProcessing}
                 style={{
                   padding: '10px 22px',
-                  backgroundColor: '#0284c7',
+                  background: 'linear-gradient(135deg, #a855f7 0%, #7c3aed 100%)',
                   border: 'none',
-                  borderRadius: '6px',
+                  borderRadius: 'var(--radius-sm)',
                   color: '#ffffff',
-                  fontWeight: 700,
-                  fontSize: '13px',
+                  fontWeight: 900,
+                  fontSize: '0.84rem',
+                  fontFamily: 'var(--font-tactical)',
+                  letterSpacing: '1px',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '8px',
-                  boxShadow: '0 4px 14px rgba(2, 132, 199, 0.4)',
+                  boxShadow: 'var(--accent-purple-glow)',
                   transition: 'all 0.2s',
                 }}
               >
@@ -842,17 +940,19 @@ export const AITestingDashboard: React.FC = () => {
                 onClick={handleStopProcessing}
                 style={{
                   padding: '10px 22px',
-                  backgroundColor: '#dc2626',
+                  background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
                   border: 'none',
-                  borderRadius: '6px',
+                  borderRadius: 'var(--radius-sm)',
                   color: '#ffffff',
-                  fontWeight: 700,
-                  fontSize: '13px',
+                  fontWeight: 900,
+                  fontSize: '0.84rem',
+                  fontFamily: 'var(--font-tactical)',
+                  letterSpacing: '1px',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '8px',
-                  boxShadow: '0 4px 14px rgba(220, 38, 38, 0.4)',
+                  boxShadow: '0 0 16px var(--accent-danger-dim)',
                 }}
               >
                 <Square size={16} fill="#ffffff" />
@@ -865,14 +965,15 @@ export const AITestingDashboard: React.FC = () => {
             <div
               style={{
                 padding: '8px 12px',
-                backgroundColor: 'rgba(239, 68, 68, 0.15)',
-                border: '1px solid #ef4444',
-                borderRadius: '6px',
+                background: 'var(--accent-danger-dim)',
+                border: '1px solid var(--accent-danger)',
+                borderRadius: 'var(--radius-sm)',
                 color: '#fca5a5',
-                fontSize: '12px',
+                fontSize: '0.78rem',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '8px',
+                fontFamily: 'var(--font-mono)',
               }}
             >
               <AlertCircle size={14} />
@@ -887,43 +988,47 @@ export const AITestingDashboard: React.FC = () => {
       {/* ------------------------------------------------------------- */}
       <section
         style={{
-          backgroundColor: '#111927',
-          border: '1px solid #1e293b',
-          borderRadius: '12px',
+          background: 'var(--bg-card)',
+          backdropFilter: 'var(--glass-blur)',
+          WebkitBackdropFilter: 'var(--glass-blur)',
+          border: '1px solid var(--border-medium)',
+          borderRadius: 'var(--radius-lg)',
           padding: '20px',
           display: 'flex',
           flexDirection: 'column',
           gap: '16px',
+          boxShadow: 'var(--card-shadow)',
         }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <BarChart3 size={18} className="text-cyan" />
+            <BarChart3 size={18} style={{ color: 'var(--accent-purple)' }} />
             <div>
-              <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 800, letterSpacing: '0.5px' }}>
+              <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 800, fontFamily: 'var(--font-tactical)', letterSpacing: '1px' }}>
                 3. REAL-TIME OBJECT & TRAFFIC ANALYTICS
               </h3>
-              <p style={{ margin: '2px 0 0', fontSize: '11px', color: '#94a3b8' }}>
+              <p style={{ margin: '2px 0 0', fontSize: '0.76rem', color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
                 Continuous vehicle velocity, density distribution, and classification telemetry
               </p>
             </div>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '11px', color: '#94a3b8' }}>CONGESTION LEVEL:</span>
+            <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)', fontFamily: 'var(--font-tactical)', fontWeight: 700 }}>CONGESTION LEVEL:</span>
             <span
               style={{
                 padding: '4px 10px',
-                borderRadius: '4px',
-                fontSize: '11px',
+                borderRadius: 'var(--radius-sm)',
+                fontSize: '0.74rem',
                 fontWeight: 800,
                 letterSpacing: '0.5px',
-                backgroundColor:
+                fontFamily: 'var(--font-mono)',
+                background:
                   analytics.congestion_level === 'HIGH'
-                    ? 'rgba(239, 68, 68, 0.2)'
+                    ? 'var(--accent-danger-dim)'
                     : analytics.congestion_level === 'MODERATE'
-                    ? 'rgba(245, 158, 11, 0.2)'
-                    : 'rgba(16, 185, 129, 0.2)',
+                    ? 'var(--accent-attention-dim)'
+                    : 'var(--accent-healthy-dim)',
                 color:
                   analytics.congestion_level === 'HIGH'
                     ? '#f87171'
@@ -932,10 +1037,10 @@ export const AITestingDashboard: React.FC = () => {
                     : '#34d399',
                 border:
                   analytics.congestion_level === 'HIGH'
-                    ? '1px solid #ef4444'
+                    ? '1px solid var(--accent-danger)'
                     : analytics.congestion_level === 'MODERATE'
-                    ? '1px solid #f59e0b'
-                    : '1px solid #10b981',
+                    ? '1px solid var(--accent-attention)'
+                    : '1px solid var(--accent-healthy)',
               }}
             >
               ● {analytics.congestion_level === 'HIGH' ? 'HIGH (CONGESTED)' : analytics.congestion_level === 'MODERATE' ? 'MODERATE FLOW' : 'LOW (FREE FLOW)'}
@@ -948,28 +1053,28 @@ export const AITestingDashboard: React.FC = () => {
           {/* 1. Vehicles Tracked */}
           <div
             style={{
-              padding: '14px',
-              backgroundColor: '#0d1522',
-              border: '1px solid #1e293b',
-              borderRadius: '8px',
+              padding: '16px',
+              background: 'var(--bg-secondary)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--radius-md)',
               display: 'flex',
               flexDirection: 'column',
               gap: '6px',
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>TOTAL VEHICLES</span>
-              <Car size={16} style={{ color: '#38bdf8' }} />
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700, fontFamily: 'var(--font-tactical)' }}>TOTAL VEHICLES</span>
+              <Car size={16} style={{ color: 'var(--accent-purple)' }} />
             </div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-              <span style={{ fontSize: '26px', fontWeight: 800, color: '#f8fafc' }}>
+              <span style={{ fontSize: '1.6rem', fontWeight: 900, color: 'var(--text-primary)', fontFamily: 'var(--font-heading)' }}>
                 {analytics.cars_count + analytics.buses_count + analytics.trucks_count + analytics.motorcycles_count}
               </span>
-              <span style={{ fontSize: '11px', color: '#38bdf8', fontWeight: 700 }}>
+              <span style={{ fontSize: '0.75rem', color: 'var(--accent-purple)', fontWeight: 800, fontFamily: 'var(--font-mono)' }}>
                 ({analytics.unique_vehicles_count} Unique)
               </span>
             </div>
-            <span style={{ fontSize: '10px', color: '#64748b' }}>
+            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
               {analytics.cars_count} Cars • {analytics.trucks_count} Trucks • {analytics.buses_count} Buses
             </span>
           </div>
@@ -977,26 +1082,26 @@ export const AITestingDashboard: React.FC = () => {
           {/* 2. Peak Density */}
           <div
             style={{
-              padding: '14px',
-              backgroundColor: '#0d1522',
-              border: '1px solid #1e293b',
-              borderRadius: '8px',
+              padding: '16px',
+              background: 'var(--bg-secondary)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--radius-md)',
               display: 'flex',
               flexDirection: 'column',
               gap: '6px',
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>PEAK SCENE DENSITY</span>
-              <TrendingUp size={16} style={{ color: '#10b981' }} />
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700, fontFamily: 'var(--font-tactical)' }}>PEAK SCENE DENSITY</span>
+              <TrendingUp size={16} style={{ color: 'var(--accent-healthy)' }} />
             </div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-              <span style={{ fontSize: '26px', fontWeight: 800, color: '#10b981' }}>
+              <span style={{ fontSize: '1.6rem', fontWeight: 900, color: 'var(--accent-healthy)', fontFamily: 'var(--font-heading)' }}>
                 {analytics.peak_frame_density}
               </span>
-              <span style={{ fontSize: '11px', color: '#94a3b8' }}>concurrent objects</span>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>concurrent objects</span>
             </div>
-            <span style={{ fontSize: '10px', color: '#64748b' }}>
+            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
               Max simultaneous detections in 1 frame
             </span>
           </div>
@@ -1004,26 +1109,26 @@ export const AITestingDashboard: React.FC = () => {
           {/* 3. Model Confidence */}
           <div
             style={{
-              padding: '14px',
-              backgroundColor: '#0d1522',
-              border: '1px solid #1e293b',
-              borderRadius: '8px',
+              padding: '16px',
+              background: 'var(--bg-secondary)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--radius-md)',
               display: 'flex',
               flexDirection: 'column',
               gap: '6px',
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>AVG MODEL CONFIDENCE</span>
-              <Gauge size={16} style={{ color: '#fbbf24' }} />
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700, fontFamily: 'var(--font-tactical)' }}>AVG MODEL CONFIDENCE</span>
+              <Gauge size={16} style={{ color: 'var(--accent-attention)' }} />
             </div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-              <span style={{ fontSize: '26px', fontWeight: 800, color: '#fbbf24' }}>
+              <span style={{ fontSize: '1.6rem', fontWeight: 900, color: 'var(--accent-attention)', fontFamily: 'var(--font-heading)' }}>
                 {analytics.avg_confidence_pct}%
               </span>
-              <span style={{ fontSize: '11px', color: '#94a3b8' }}>certainty</span>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>certainty</span>
             </div>
-            <span style={{ fontSize: '10px', color: '#64748b' }}>
+            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
               Mean score across YOLO inference passes
             </span>
           </div>
@@ -1031,26 +1136,26 @@ export const AITestingDashboard: React.FC = () => {
           {/* 4. Number Plates Identified */}
           <div
             style={{
-              padding: '14px',
-              backgroundColor: '#0d1522',
-              border: '1px solid #1e293b',
-              borderRadius: '8px',
+              padding: '16px',
+              background: 'var(--bg-secondary)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--radius-md)',
               display: 'flex',
               flexDirection: 'column',
               gap: '6px',
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>ANPR PLATES FOUND</span>
-              <Zap size={16} style={{ color: '#c084fc' }} />
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700, fontFamily: 'var(--font-tactical)' }}>ANPR PLATES FOUND</span>
+              <Zap size={16} style={{ color: 'var(--accent-blue)' }} />
             </div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-              <span style={{ fontSize: '26px', fontWeight: 800, color: '#c084fc' }}>
+              <span style={{ fontSize: '1.6rem', fontWeight: 900, color: 'var(--accent-blue)', fontFamily: 'var(--font-heading)' }}>
                 {anprResults.length}
               </span>
-              <span style={{ fontSize: '11px', color: '#94a3b8' }}>recognized</span>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>recognized</span>
             </div>
-            <span style={{ fontSize: '10px', color: '#64748b' }}>
+            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
               Gujarat RTO & Indian registration plates
             </span>
           </div>
@@ -1060,93 +1165,93 @@ export const AITestingDashboard: React.FC = () => {
         <div
           style={{
             padding: '16px',
-            backgroundColor: '#0d1522',
-            border: '1px solid #1e293b',
-            borderRadius: '8px',
+            background: 'var(--bg-secondary)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-md)',
             display: 'flex',
             flexDirection: 'column',
             gap: '12px',
           }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '12px', fontWeight: 700, color: '#e2e8f0', letterSpacing: '0.5px' }}>
+            <span style={{ fontSize: '0.8rem', fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'var(--font-tactical)', letterSpacing: '0.5px' }}>
               VEHICLE & OBJECT CLASSIFICATION MATRIX
             </span>
-            <span style={{ fontSize: '11px', color: '#64748b' }}>
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
               {analytics.total_objects_tracked} Total Frames Detected
             </span>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '12px' }}>
             {/* Cars */}
-            <div style={{ backgroundColor: '#111927', padding: '10px', borderRadius: '6px', border: '1px solid #1e293b' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#10b981', fontSize: '11px', fontWeight: 700 }}>
+            <div style={{ background: 'var(--bg-tertiary)', padding: '10px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--accent-healthy)', fontSize: '0.75rem', fontWeight: 800, fontFamily: 'var(--font-tactical)' }}>
                 <Car size={14} />
                 <span>CARS</span>
               </div>
-              <div style={{ fontSize: '18px', fontWeight: 800, marginTop: '4px' }}>{analytics.cars_count}</div>
-              <div style={{ height: '4px', backgroundColor: '#1e293b', borderRadius: '2px', marginTop: '6px', overflow: 'hidden' }}>
-                <div style={{ width: `${analytics.total_objects_tracked ? (analytics.cars_count / analytics.total_objects_tracked) * 100 : 0}%`, height: '100%', backgroundColor: '#10b981' }} />
+              <div style={{ fontSize: '1.2rem', fontWeight: 900, marginTop: '4px', fontFamily: 'var(--font-heading)' }}>{analytics.cars_count}</div>
+              <div style={{ height: '4px', background: 'rgba(255,255,255,0.06)', borderRadius: '2px', marginTop: '6px', overflow: 'hidden' }}>
+                <div style={{ width: `${analytics.total_objects_tracked ? (analytics.cars_count / analytics.total_objects_tracked) * 100 : 0}%`, height: '100%', background: 'var(--accent-healthy)' }} />
               </div>
             </div>
 
             {/* Trucks */}
-            <div style={{ backgroundColor: '#111927', padding: '10px', borderRadius: '6px', border: '1px solid #1e293b' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#f59e0b', fontSize: '11px', fontWeight: 700 }}>
+            <div style={{ background: 'var(--bg-tertiary)', padding: '10px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--accent-attention)', fontSize: '0.75rem', fontWeight: 800, fontFamily: 'var(--font-tactical)' }}>
                 <Truck size={14} />
                 <span>TRUCKS</span>
               </div>
-              <div style={{ fontSize: '18px', fontWeight: 800, marginTop: '4px' }}>{analytics.trucks_count}</div>
-              <div style={{ height: '4px', backgroundColor: '#1e293b', borderRadius: '2px', marginTop: '6px', overflow: 'hidden' }}>
-                <div style={{ width: `${analytics.total_objects_tracked ? (analytics.trucks_count / analytics.total_objects_tracked) * 100 : 0}%`, height: '100%', backgroundColor: '#f59e0b' }} />
+              <div style={{ fontSize: '1.2rem', fontWeight: 900, marginTop: '4px', fontFamily: 'var(--font-heading)' }}>{analytics.trucks_count}</div>
+              <div style={{ height: '4px', background: 'rgba(255,255,255,0.06)', borderRadius: '2px', marginTop: '6px', overflow: 'hidden' }}>
+                <div style={{ width: `${analytics.total_objects_tracked ? (analytics.trucks_count / analytics.total_objects_tracked) * 100 : 0}%`, height: '100%', background: 'var(--accent-attention)' }} />
               </div>
             </div>
 
             {/* Buses */}
-            <div style={{ backgroundColor: '#111927', padding: '10px', borderRadius: '6px', border: '1px solid #1e293b' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#d97706', fontSize: '11px', fontWeight: 700 }}>
+            <div style={{ background: 'var(--bg-tertiary)', padding: '10px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--accent-warning)', fontSize: '0.75rem', fontWeight: 800, fontFamily: 'var(--font-tactical)' }}>
                 <Bus size={14} />
                 <span>BUSES</span>
               </div>
-              <div style={{ fontSize: '18px', fontWeight: 800, marginTop: '4px' }}>{analytics.buses_count}</div>
-              <div style={{ height: '4px', backgroundColor: '#1e293b', borderRadius: '2px', marginTop: '6px', overflow: 'hidden' }}>
-                <div style={{ width: `${analytics.total_objects_tracked ? (analytics.buses_count / analytics.total_objects_tracked) * 100 : 0}%`, height: '100%', backgroundColor: '#d97706' }} />
+              <div style={{ fontSize: '1.2rem', fontWeight: 900, marginTop: '4px', fontFamily: 'var(--font-heading)' }}>{analytics.buses_count}</div>
+              <div style={{ height: '4px', background: 'rgba(255,255,255,0.06)', borderRadius: '2px', marginTop: '6px', overflow: 'hidden' }}>
+                <div style={{ width: `${analytics.total_objects_tracked ? (analytics.buses_count / analytics.total_objects_tracked) * 100 : 0}%`, height: '100%', background: 'var(--accent-warning)' }} />
               </div>
             </div>
 
             {/* Motorcycles */}
-            <div style={{ backgroundColor: '#111927', padding: '10px', borderRadius: '6px', border: '1px solid #1e293b' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#c084fc', fontSize: '11px', fontWeight: 700 }}>
+            <div style={{ background: 'var(--bg-tertiary)', padding: '10px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--accent-purple)', fontSize: '0.75rem', fontWeight: 800, fontFamily: 'var(--font-tactical)' }}>
                 <Bike size={14} />
                 <span>2-WHEELERS</span>
               </div>
-              <div style={{ fontSize: '18px', fontWeight: 800, marginTop: '4px' }}>{analytics.motorcycles_count}</div>
-              <div style={{ height: '4px', backgroundColor: '#1e293b', borderRadius: '2px', marginTop: '6px', overflow: 'hidden' }}>
-                <div style={{ width: `${analytics.total_objects_tracked ? (analytics.motorcycles_count / analytics.total_objects_tracked) * 100 : 0}%`, height: '100%', backgroundColor: '#c084fc' }} />
+              <div style={{ fontSize: '1.2rem', fontWeight: 900, marginTop: '4px', fontFamily: 'var(--font-heading)' }}>{analytics.motorcycles_count}</div>
+              <div style={{ height: '4px', background: 'rgba(255,255,255,0.06)', borderRadius: '2px', marginTop: '6px', overflow: 'hidden' }}>
+                <div style={{ width: `${analytics.total_objects_tracked ? (analytics.motorcycles_count / analytics.total_objects_tracked) * 100 : 0}%`, height: '100%', background: 'var(--accent-purple)' }} />
               </div>
             </div>
 
             {/* Pedestrians */}
-            <div style={{ backgroundColor: '#111927', padding: '10px', borderRadius: '6px', border: '1px solid #1e293b' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#38bdf8', fontSize: '11px', fontWeight: 700 }}>
+            <div style={{ background: 'var(--bg-tertiary)', padding: '10px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--accent-blue)', fontSize: '0.75rem', fontWeight: 800, fontFamily: 'var(--font-tactical)' }}>
                 <User size={14} />
                 <span>PERSONS</span>
               </div>
-              <div style={{ fontSize: '18px', fontWeight: 800, marginTop: '4px' }}>{analytics.pedestrians_count}</div>
-              <div style={{ height: '4px', backgroundColor: '#1e293b', borderRadius: '2px', marginTop: '6px', overflow: 'hidden' }}>
-                <div style={{ width: `${analytics.total_objects_tracked ? (analytics.pedestrians_count / analytics.total_objects_tracked) * 100 : 0}%`, height: '100%', backgroundColor: '#38bdf8' }} />
+              <div style={{ fontSize: '1.2rem', fontWeight: 900, marginTop: '4px', fontFamily: 'var(--font-heading)' }}>{analytics.pedestrians_count}</div>
+              <div style={{ height: '4px', background: 'rgba(255,255,255,0.06)', borderRadius: '2px', marginTop: '6px', overflow: 'hidden' }}>
+                <div style={{ width: `${analytics.total_objects_tracked ? (analytics.pedestrians_count / analytics.total_objects_tracked) * 100 : 0}%`, height: '100%', background: 'var(--accent-blue)' }} />
               </div>
             </div>
 
             {/* Bicycles */}
-            <div style={{ backgroundColor: '#111927', padding: '10px', borderRadius: '6px', border: '1px solid #1e293b' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#facc15', fontSize: '11px', fontWeight: 700 }}>
+            <div style={{ background: 'var(--bg-tertiary)', padding: '10px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#facc15', fontSize: '0.75rem', fontWeight: 800, fontFamily: 'var(--font-tactical)' }}>
                 <Activity size={14} />
                 <span>BICYCLES</span>
               </div>
-              <div style={{ fontSize: '18px', fontWeight: 800, marginTop: '4px' }}>{analytics.bicycles_count}</div>
-              <div style={{ height: '4px', backgroundColor: '#1e293b', borderRadius: '2px', marginTop: '6px', overflow: 'hidden' }}>
-                <div style={{ width: `${analytics.total_objects_tracked ? (analytics.bicycles_count / analytics.total_objects_tracked) * 100 : 0}%`, height: '100%', backgroundColor: '#facc15' }} />
+              <div style={{ fontSize: '1.2rem', fontWeight: 900, marginTop: '4px', fontFamily: 'var(--font-heading)' }}>{analytics.bicycles_count}</div>
+              <div style={{ height: '4px', background: 'rgba(255,255,255,0.06)', borderRadius: '2px', marginTop: '6px', overflow: 'hidden' }}>
+                <div style={{ width: `${analytics.total_objects_tracked ? (analytics.bicycles_count / analytics.total_objects_tracked) * 100 : 0}%`, height: '100%', background: '#facc15' }} />
               </div>
             </div>
           </div>
@@ -1166,34 +1271,37 @@ export const AITestingDashboard: React.FC = () => {
         {/* Left: Video Display Player / Live Canvas */}
         <div
           style={{
-            backgroundColor: '#111927',
-            border: '1px solid #1e293b',
-            borderRadius: '12px',
+            background: 'var(--bg-card)',
+            backdropFilter: 'var(--glass-blur)',
+            WebkitBackdropFilter: 'var(--glass-blur)',
+            border: '1px solid var(--border-medium)',
+            borderRadius: 'var(--radius-lg)',
             padding: '20px',
             display: 'flex',
             flexDirection: 'column',
             gap: '14px',
+            boxShadow: 'var(--card-shadow)',
           }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Eye size={16} className="text-cyan" />
-              <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 700, letterSpacing: '0.5px' }}>
+              <Eye size={16} style={{ color: 'var(--accent-purple)' }} />
+              <h3 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 800, fontFamily: 'var(--font-tactical)', letterSpacing: '1px' }}>
                 4. PROCESSED VIDEO & LIVE HUD DISPLAY
               </h3>
             </div>
 
             {snapshotResult ? (
-              <span style={{ fontSize: '12px', color: '#10b981', fontWeight: 700 }}>
+              <span style={{ fontSize: '0.78rem', color: 'var(--accent-healthy)', fontWeight: 800, fontFamily: 'var(--font-mono)' }}>
                 ✔ LIVE SNAPSHOT CAPTURED ({snapshotResult.total_detections} OBJECTS, {snapshotResult.total_plates || 0} PLATES)
               </span>
             ) : jobState && (
-              <span style={{ fontSize: '12px', color: '#38bdf8', fontWeight: 700 }}>
+              <span style={{ fontSize: '0.78rem', color: 'var(--accent-purple)', fontWeight: 800, fontFamily: 'var(--font-mono)' }}>
                 {jobState.status === 'PROCESSING' && (
                   <span className="animate-pulse">● LIVE INFERENCE ({jobState.progress_percent}%)</span>
                 )}
                 {jobState.status === 'COMPLETED' && (
-                  <span style={{ color: '#10b981' }}>✔ PROCESSING COMPLETE (100%)</span>
+                  <span style={{ color: 'var(--accent-healthy)' }}>✔ PROCESSING COMPLETE (100%)</span>
                 )}
               </span>
             )}
@@ -1205,13 +1313,14 @@ export const AITestingDashboard: React.FC = () => {
               position: 'relative',
               width: '100%',
               aspectRatio: '16 / 9',
-              backgroundColor: '#020617',
-              borderRadius: '8px',
+              background: '#000000',
+              borderRadius: 'var(--radius-md)',
               overflow: 'hidden',
-              border: '1px solid #1e293b',
+              border: '1px solid var(--border-medium)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
+              boxShadow: '0 8px 30px rgba(0,0,0,0.8)',
             }}
           >
             {/* 1. Live Snapshot Image */}
@@ -1241,12 +1350,12 @@ export const AITestingDashboard: React.FC = () => {
               />
             ) : (
               /* 4. Idle Standby Screen */
-              <div style={{ textAlign: 'center', color: '#64748b' }}>
-                <Video size={48} style={{ marginBottom: '12px', opacity: 0.4 }} />
-                <p style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: '#94a3b8' }}>
+              <div style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+                <Video size={48} style={{ marginBottom: '12px', opacity: 0.3 }} />
+                <p style={{ margin: 0, fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-tactical)', letterSpacing: '0.5px' }}>
                   Surveillance Stream Display Standby
                 </p>
-                <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#64748b' }}>
+                <p style={{ margin: '4px 0 0', fontSize: '0.78rem', color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
                   Select Sentinel Camera and click Live Snapshot or Start Processing
                 </p>
               </div>
@@ -1256,16 +1365,16 @@ export const AITestingDashboard: React.FC = () => {
           {/* Progress Bar & Playback Controls */}
           {jobState && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-                <span style={{ color: '#94a3b8' }}>
-                  Frames: <strong>{jobState.frames_processed}</strong> / {jobState.total_frames}
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', fontFamily: 'var(--font-mono)' }}>
+                <span style={{ color: 'var(--text-muted)' }}>
+                  Frames: <strong style={{ color: 'var(--text-primary)' }}>{jobState.frames_processed}</strong> / {jobState.total_frames}
                 </span>
-                <span style={{ color: '#38bdf8', fontWeight: 700 }}>
+                <span style={{ color: 'var(--accent-purple)', fontWeight: 800 }}>
                   {jobState.progress_percent.toFixed(1)}%
                 </span>
-                <span style={{ color: '#94a3b8' }}>
-                  Speed: <strong>{jobState.processing_fps} FPS</strong> | Elapsed:{' '}
-                  <strong>{jobState.elapsed_seconds}s</strong>
+                <span style={{ color: 'var(--text-muted)' }}>
+                  Speed: <strong style={{ color: 'var(--text-primary)' }}>{jobState.processing_fps} FPS</strong> | Elapsed:{' '}
+                  <strong style={{ color: 'var(--text-primary)' }}>{jobState.elapsed_seconds}s</strong>
                 </span>
               </div>
 
@@ -1273,7 +1382,7 @@ export const AITestingDashboard: React.FC = () => {
                 style={{
                   width: '100%',
                   height: '6px',
-                  backgroundColor: '#1e293b',
+                  background: 'var(--bg-secondary)',
                   borderRadius: '3px',
                   overflow: 'hidden',
                 }}
@@ -1282,7 +1391,7 @@ export const AITestingDashboard: React.FC = () => {
                   style={{
                     height: '100%',
                     width: `${jobState.progress_percent}%`,
-                    backgroundColor: jobState.status === 'COMPLETED' ? '#10b981' : '#38bdf8',
+                    background: jobState.status === 'COMPLETED' ? 'var(--accent-healthy)' : 'var(--accent-purple)',
                     transition: 'width 0.3s ease',
                   }}
                 />
@@ -1292,19 +1401,20 @@ export const AITestingDashboard: React.FC = () => {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px' }}>
                   {/* Speed Controls */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span style={{ fontSize: '11px', color: '#94a3b8' }}>SPEED:</span>
+                    <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)', fontFamily: 'var(--font-tactical)', fontWeight: 700 }}>SPEED:</span>
                     {[0.5, 1.0, 2.0].map((spd) => (
                       <button
                         key={spd}
                         onClick={() => handleSetSpeed(spd)}
                         style={{
                           padding: '2px 8px',
-                          borderRadius: '4px',
+                          borderRadius: 'var(--radius-sm)',
                           border: 'none',
-                          backgroundColor: playbackSpeed === spd ? '#0284c7' : '#1e293b',
+                          background: playbackSpeed === spd ? 'var(--accent-purple)' : 'var(--bg-secondary)',
                           color: '#ffffff',
-                          fontSize: '10px',
-                          fontWeight: 700,
+                          fontSize: '0.72rem',
+                          fontWeight: 800,
+                          fontFamily: 'var(--font-mono)',
                           cursor: 'pointer',
                         }}
                       >
@@ -1320,12 +1430,13 @@ export const AITestingDashboard: React.FC = () => {
                       }}
                       style={{
                         padding: '2px 8px',
-                        borderRadius: '4px',
+                        borderRadius: 'var(--radius-sm)',
                         border: 'none',
-                        backgroundColor: '#1e293b',
-                        color: '#94a3b8',
-                        fontSize: '10px',
-                        fontWeight: 700,
+                        background: 'var(--bg-secondary)',
+                        color: 'var(--text-muted)',
+                        fontSize: '0.72rem',
+                        fontWeight: 800,
+                        fontFamily: 'var(--font-mono)',
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
@@ -1345,12 +1456,15 @@ export const AITestingDashboard: React.FC = () => {
                       alignItems: 'center',
                       gap: '6px',
                       padding: '6px 14px',
-                      backgroundColor: '#10b981',
-                      borderRadius: '6px',
-                      color: '#ffffff',
-                      fontSize: '12px',
-                      fontWeight: 700,
+                      background: 'var(--accent-healthy-dim)',
+                      border: '1px solid var(--accent-healthy)',
+                      borderRadius: 'var(--radius-sm)',
+                      color: 'var(--accent-healthy)',
+                      fontSize: '0.78rem',
+                      fontWeight: 800,
+                      fontFamily: 'var(--font-tactical)',
                       textDecoration: 'none',
+                      boxShadow: '0 0 12px var(--accent-healthy-dim)',
                     }}
                   >
                     <Download size={14} />
@@ -1365,31 +1479,36 @@ export const AITestingDashboard: React.FC = () => {
         {/* Right: Live Detection Stream Panel */}
         <div
           style={{
-            backgroundColor: '#111927',
-            border: '1px solid #1e293b',
-            borderRadius: '12px',
+            background: 'var(--bg-card)',
+            backdropFilter: 'var(--glass-blur)',
+            WebkitBackdropFilter: 'var(--glass-blur)',
+            border: '1px solid var(--border-medium)',
+            borderRadius: 'var(--radius-lg)',
             padding: '20px',
             display: 'flex',
             flexDirection: 'column',
             gap: '12px',
             maxHeight: '620px',
+            boxShadow: 'var(--card-shadow)',
           }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Activity size={16} className="text-cyan" />
-              <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 700, letterSpacing: '0.5px' }}>
+              <Activity size={16} style={{ color: 'var(--accent-purple)' }} />
+              <h3 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 800, fontFamily: 'var(--font-tactical)', letterSpacing: '1px' }}>
                 5. DETECTION FEED
               </h3>
             </div>
             <span
               style={{
-                fontSize: '11px',
-                backgroundColor: '#1e293b',
+                fontSize: '0.74rem',
+                background: 'var(--accent-purple-dim)',
+                border: '1px solid var(--border-active)',
                 padding: '2px 8px',
-                borderRadius: '4px',
-                color: '#38bdf8',
-                fontWeight: 700,
+                borderRadius: 'var(--radius-sm)',
+                color: 'var(--accent-purple)',
+                fontWeight: 800,
+                fontFamily: 'var(--font-mono)',
               }}
             >
               {recentDetections.length} DISPLAYED
@@ -1397,20 +1516,24 @@ export const AITestingDashboard: React.FC = () => {
           </div>
 
           {/* Filter Bar */}
-          <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
             {['ALL', 'CARS', 'AUTOS', 'SCOOTERS', 'BIKES', 'BUSES', 'TRUCKS', 'PERSONS', 'PLATES'].map((flt) => (
               <button
                 key={flt}
                 onClick={() => setFeedFilter(flt)}
                 style={{
                   padding: '3px 8px',
-                  borderRadius: '4px',
-                  border: 'none',
-                  backgroundColor: feedFilter === flt ? '#0284c7' : '#0d1522',
-                  color: feedFilter === flt ? '#ffffff' : '#94a3b8',
-                  fontSize: '10px',
-                  fontWeight: 700,
+                  borderRadius: 'var(--radius-sm)',
+                  border: feedFilter === flt ? '1px solid var(--accent-purple)' : '1px solid var(--border-subtle)',
+                  background: feedFilter === flt ? 'var(--accent-purple-dim)' : 'var(--bg-secondary)',
+                  color: feedFilter === flt ? 'var(--accent-purple)' : 'var(--text-muted)',
+                  fontSize: '0.72rem',
+                  fontWeight: 800,
+                  fontFamily: 'var(--font-tactical)',
+                  letterSpacing: '0.5px',
                   cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                  boxShadow: feedFilter === flt ? '0 0 10px var(--accent-purple-dim)' : 'none',
                 }}
               >
                 {flt}
@@ -1424,11 +1547,13 @@ export const AITestingDashboard: React.FC = () => {
               display: 'grid',
               gridTemplateColumns: '1.6fr 1fr 1fr',
               padding: '6px 10px',
-              backgroundColor: '#0d1522',
-              borderRadius: '6px',
-              fontSize: '11px',
-              fontWeight: 700,
-              color: '#94a3b8',
+              background: 'var(--bg-secondary)',
+              borderRadius: 'var(--radius-sm)',
+              fontSize: '0.74rem',
+              fontWeight: 800,
+              color: 'var(--text-muted)',
+              fontFamily: 'var(--font-tactical)',
+              letterSpacing: '0.5px',
             }}
           >
             <span>OBJECT & TRACK</span>
@@ -1452,8 +1577,9 @@ export const AITestingDashboard: React.FC = () => {
                 style={{
                   textAlign: 'center',
                   padding: '40px 10px',
-                  color: '#64748b',
-                  fontSize: '12px',
+                  color: 'var(--text-muted)',
+                  fontSize: '0.8rem',
+                  fontFamily: 'var(--font-body)',
                 }}
               >
                 No live detection events match filter. Start processing to stream events.
@@ -1465,10 +1591,9 @@ export const AITestingDashboard: React.FC = () => {
                 .map((ev, idx) => {
                   const isPlate = Boolean(ev.license_plate && ev.object_class === ev.license_plate);
                   const isCar = ev.object_class === 'CAR' || ev.vehicle_type?.toLowerCase() === 'car';
-                  const isAutoRickshaw = ev.object_class === 'AUTO_RICKSHAW' || ev.vehicle_type?.toLowerCase().includes('rickshaw');
-                  const nameLower = (ev.display_name || ev.vehicle_type || '').toLowerCase();
-                  const isScooter = nameLower.includes('activa') || nameLower.includes('access') || nameLower.includes('jupiter') || nameLower.includes('scooter');
-                  const isBike = nameLower.includes('splendor') || nameLower.includes('pulsar') || nameLower.includes('royal') || nameLower.includes('enfield') || nameLower.includes('shine') || nameLower.includes('apache') || (ev.object_class === 'MOTORCYCLE' && !isScooter);
+                  const isAuto = ev.object_class === 'AUTO_RICKSHAW' || ev.vehicle_type?.toLowerCase().includes('auto') || ev.display_name?.toLowerCase().includes('auto');
+                  const isScooter = ev.display_name?.toLowerCase().includes('scooter') || ev.display_name?.toLowerCase().includes('activa') || ev.display_name?.toLowerCase().includes('access');
+                  const isBike = ev.object_class === 'MOTORCYCLE' || ev.vehicle_type?.toLowerCase() === 'motorcycle' || ev.display_name?.toLowerCase().includes('splendor') || ev.display_name?.toLowerCase().includes('bullet') || ev.display_name?.toLowerCase().includes('enfield') || ev.display_name?.toLowerCase().includes('pulsar');
                   const isBus = ev.object_class === 'BUS' || ev.vehicle_type?.toLowerCase() === 'bus';
                   const isTruck = ev.object_class === 'TRUCK' || ev.vehicle_type?.toLowerCase() === 'truck';
                   const isPerson = ev.object_class === 'PERSON';
@@ -1481,73 +1606,75 @@ export const AITestingDashboard: React.FC = () => {
                         display: 'grid',
                         gridTemplateColumns: '1.6fr 1fr 1fr',
                         alignItems: 'center',
-                        padding: '10px',
-                        backgroundColor: '#0d1522',
-                        border: isPlate ? '1px solid #ef4444' : '1px solid #1e293b',
-                        borderRadius: '6px',
-                        fontSize: '12px',
+                        padding: '10px 12px',
+                        background: 'var(--bg-secondary)',
+                        border: isPlate ? '1px solid var(--accent-danger)' : '1px solid var(--border-subtle)',
+                        borderRadius: 'var(--radius-sm)',
+                        fontSize: '0.78rem',
                         borderLeft: isPlate
-                          ? '4px solid #ef4444'
-                          : isAutoRickshaw
-                          ? '4px solid #38bdf8'
+                          ? '4px solid var(--accent-danger)'
+                          : isCar
+                          ? '4px solid var(--accent-healthy)'
+                          : isAuto
+                          ? '4px solid var(--accent-blue)'
                           : isScooter
                           ? '4px solid #06b6d4'
                           : isBike
-                          ? '4px solid #c084fc'
-                          : isCar
-                          ? '4px solid #10b981'
+                          ? '4px solid var(--accent-purple)'
                           : isBus
-                          ? '4px solid #d97706'
+                          ? '4px solid var(--accent-warning)'
                           : isTruck
-                          ? '4px solid #f59e0b'
+                          ? '4px solid var(--accent-attention)'
                           : isPerson
                           ? '4px solid #00f0ff'
-                          : '4px solid #38bdf8',
+                          : '4px solid var(--accent-purple)',
                       }}
                     >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         {isPlate ? (
                           <span
                             style={{
-                              backgroundColor: '#ef4444',
+                              background: 'var(--accent-danger)',
                               color: '#ffffff',
-                              fontSize: '10px',
-                              fontWeight: 800,
+                              fontSize: '0.65rem',
+                              fontWeight: 900,
                               padding: '1px 5px',
-                              borderRadius: '3px',
+                              borderRadius: '2px',
+                              fontFamily: 'var(--font-mono)',
                             }}
                           >
                             PLATE
                           </span>
-                        ) : isAutoRickshaw ? (
-                          <Car size={14} style={{ color: '#38bdf8' }} />
+                        ) : isCar ? (
+                          <Car size={14} style={{ color: 'var(--accent-healthy)' }} />
+                        ) : isAuto ? (
+                          <Zap size={14} style={{ color: 'var(--accent-blue)' }} />
                         ) : isScooter ? (
                           <Bike size={14} style={{ color: '#06b6d4' }} />
                         ) : isBike ? (
-                          <Bike size={14} style={{ color: '#c084fc' }} />
-                        ) : isCar ? (
-                          <Car size={14} style={{ color: '#10b981' }} />
+                          <Bike size={14} style={{ color: 'var(--accent-purple)' }} />
                         ) : isBus ? (
-                          <Bus size={14} style={{ color: '#d97706' }} />
+                          <Bus size={14} style={{ color: 'var(--accent-warning)' }} />
                         ) : isTruck ? (
-                          <Truck size={14} style={{ color: '#f59e0b' }} />
+                          <Truck size={14} style={{ color: 'var(--accent-attention)' }} />
                         ) : isPerson ? (
                           <User size={14} style={{ color: '#00f0ff' }} />
                         ) : (
-                          <Shield size={14} style={{ color: '#f59e0b' }} />
+                          <Shield size={14} style={{ color: 'var(--accent-attention)' }} />
                         )}
                         <div style={{ display: 'flex', flexDirection: 'column' }}>
                           <strong
                             style={{
-                              color: isPlate ? '#fca5a5' : '#f8fafc',
-                              fontFamily: isPlate ? "'Courier New', monospace" : 'inherit',
-                              fontSize: '12px',
+                              color: isPlate ? '#fca5a5' : 'var(--text-primary)',
+                              fontFamily: isPlate ? 'var(--font-mono)' : 'var(--font-tactical)',
+                              fontSize: '0.82rem',
+                              letterSpacing: '0.4px',
                             }}
                           >
                             {ev.display_name || ev.object_class}
                           </strong>
                           {ev.track_id && (
-                            <span style={{ fontSize: '10px', color: '#64748b' }}>
+                            <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
                               #TRK-{ev.track_id}
                             </span>
                           )}
@@ -1557,8 +1684,10 @@ export const AITestingDashboard: React.FC = () => {
                       <div style={{ textAlign: 'center' }}>
                         <span
                           style={{
-                            color: confPct >= 75 ? '#34d399' : confPct >= 50 ? '#fbbf24' : '#f87171',
-                            fontWeight: 700,
+                            color: confPct >= 75 ? 'var(--accent-healthy)' : confPct >= 50 ? 'var(--accent-attention)' : 'var(--accent-danger)',
+                            fontWeight: 800,
+                            fontFamily: 'var(--font-mono)',
+                            fontSize: '0.78rem',
                           }}
                         >
                           {confPct}%
@@ -1568,9 +1697,9 @@ export const AITestingDashboard: React.FC = () => {
                       <div
                         style={{
                           textAlign: 'right',
-                          color: '#94a3b8',
-                          fontFamily: "'Courier New', monospace",
-                          fontSize: '11px',
+                          color: 'var(--text-muted)',
+                          fontFamily: 'var(--font-mono)',
+                          fontSize: '0.74rem',
                         }}
                       >
                         {ev.time_str}
@@ -1588,42 +1717,45 @@ export const AITestingDashboard: React.FC = () => {
       {/* ------------------------------------------------------------- */}
       <section
         style={{
-          backgroundColor: '#111927',
-          border: '1px solid #1e293b',
-          borderRadius: '12px',
+          background: 'var(--bg-card)',
+          backdropFilter: 'var(--glass-blur)',
+          WebkitBackdropFilter: 'var(--glass-blur)',
+          border: '1px solid var(--border-medium)',
+          borderRadius: 'var(--radius-lg)',
           padding: '20px',
           display: 'flex',
           flexDirection: 'column',
           gap: '16px',
+          boxShadow: 'var(--card-shadow)',
         }}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <Car size={18} className="text-cyan" />
+            <Car size={18} style={{ color: 'var(--accent-purple)' }} />
             <div>
-              <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 800, letterSpacing: '0.5px' }}>
+              <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 800, fontFamily: 'var(--font-tactical)', letterSpacing: '1px' }}>
                 6. ANPR RESULTS TABLE (RECOGNIZED NUMBER PLATES)
               </h3>
-              <p style={{ margin: '2px 0 0', fontSize: '11px', color: '#94a3b8' }}>
+              <p style={{ margin: '2px 0 0', fontSize: '0.76rem', color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
                 Identified Gujarat RTO and Indian vehicle registration plates with confidence & jurisdiction
               </p>
             </div>
           </div>
 
-          {/* Search Box */}
+          {/* Search Box & CSV Export */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <div
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 gap: '8px',
-                backgroundColor: '#0d1522',
-                border: '1px solid #334155',
-                borderRadius: '6px',
+                background: 'var(--bg-input)',
+                border: '1px solid var(--border-medium)',
+                borderRadius: 'var(--radius-sm)',
                 padding: '6px 12px',
               }}
             >
-              <Search size={14} style={{ color: '#64748b' }} />
+              <Search size={14} style={{ color: 'var(--text-muted)' }} />
               <input
                 type="text"
                 placeholder="Filter plates or vehicle..."
@@ -1632,13 +1764,40 @@ export const AITestingDashboard: React.FC = () => {
                 style={{
                   background: 'transparent',
                   border: 'none',
-                  color: '#f8fafc',
-                  fontSize: '12px',
+                  color: 'var(--text-primary)',
+                  fontSize: '0.78rem',
                   outline: 'none',
                   width: '180px',
+                  fontFamily: 'var(--font-body)',
                 }}
               />
             </div>
+
+            <button
+              onClick={handleExportCsv}
+              disabled={filteredPlates.length === 0}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '7px 16px',
+                background: filteredPlates.length > 0 ? 'var(--accent-healthy-dim)' : 'var(--bg-secondary)',
+                color: filteredPlates.length > 0 ? 'var(--accent-healthy)' : 'var(--text-muted)',
+                border: filteredPlates.length > 0 ? '1px solid var(--accent-healthy)' : '1px solid var(--border-subtle)',
+                borderRadius: 'var(--radius-sm)',
+                fontSize: '0.78rem',
+                fontWeight: 800,
+                fontFamily: 'var(--font-tactical)',
+                letterSpacing: '0.5px',
+                cursor: filteredPlates.length > 0 ? 'pointer' : 'not-allowed',
+                boxShadow: filteredPlates.length > 0 ? '0 0 14px var(--accent-healthy-dim)' : 'none',
+                transition: 'all 0.15s ease',
+              }}
+              title="Export detected license plates to CSV spreadsheet"
+            >
+              <Download size={13} />
+              <span>EXPORT CSV ({filteredPlates.length})</span>
+            </button>
           </div>
         </div>
 
@@ -1649,17 +1808,18 @@ export const AITestingDashboard: React.FC = () => {
               width: '100%',
               borderCollapse: 'collapse',
               textAlign: 'left',
-              fontSize: '13px',
+              fontSize: '0.82rem',
             }}
           >
             <thead>
               <tr
                 style={{
-                  borderBottom: '2px solid #1e293b',
-                  color: '#94a3b8',
-                  fontSize: '11px',
+                  borderBottom: '1px solid var(--border-medium)',
+                  color: 'var(--text-muted)',
+                  fontSize: '0.74rem',
                   textTransform: 'uppercase',
-                  letterSpacing: '0.5px',
+                  letterSpacing: '0.8px',
+                  fontFamily: 'var(--font-tactical)',
                 }}
               >
                 <th style={{ padding: '12px 16px' }}>Number Plate</th>
@@ -1678,8 +1838,9 @@ export const AITestingDashboard: React.FC = () => {
                     style={{
                       padding: '32px',
                       textAlign: 'center',
-                      color: '#64748b',
-                      fontSize: '13px',
+                      color: 'var(--text-muted)',
+                      fontSize: '0.82rem',
+                      fontFamily: 'var(--font-body)',
                     }}
                   >
                     No license plates recognized yet. Start ANPR or YOLO+ANPR processing on vehicle footage.
@@ -1692,8 +1853,8 @@ export const AITestingDashboard: React.FC = () => {
                     <tr
                       key={plate.id}
                       style={{
-                        borderBottom: '1px solid #1e293b',
-                        backgroundColor: '#0b121e',
+                        borderBottom: '1px solid var(--border-subtle)',
+                        background: 'var(--bg-secondary)',
                         transition: 'background-color 0.2s',
                       }}
                     >
@@ -1703,26 +1864,27 @@ export const AITestingDashboard: React.FC = () => {
                           style={{
                             display: 'inline-flex',
                             alignItems: 'center',
-                            backgroundColor: '#ffffff',
+                            background: '#ffffff',
                             color: '#000000',
                             border: '1px solid #000000',
                             borderRadius: '4px',
                             padding: '3px 8px',
-                            fontFamily: "'Courier New', monospace",
-                            fontWeight: 800,
-                            fontSize: '13px',
+                            fontFamily: 'var(--font-mono)',
+                            fontWeight: 900,
+                            fontSize: '0.82rem',
                             letterSpacing: '1px',
-                            boxShadow: '0 2px 4px rgba(0,0,0,0.3)',
+                            boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
                           }}
                         >
                           <span
                             style={{
-                              backgroundColor: '#1e3a8a',
+                              background: '#1e3a8a',
                               color: '#ffffff',
-                              fontSize: '8px',
+                              fontSize: '0.58rem',
                               padding: '1px 3px',
                               borderRadius: '2px',
                               marginRight: '6px',
+                              fontWeight: 800,
                             }}
                           >
                             IND
@@ -1735,8 +1897,10 @@ export const AITestingDashboard: React.FC = () => {
                       <td style={{ padding: '12px 16px' }}>
                         <span
                           style={{
-                            color: confPct >= 85 ? '#34d399' : '#fbbf24',
-                            fontWeight: 700,
+                            color: confPct >= 85 ? 'var(--accent-healthy)' : 'var(--accent-attention)',
+                            fontWeight: 800,
+                            fontFamily: 'var(--font-mono)',
+                            fontSize: '0.82rem',
                           }}
                         >
                           {confPct}%
@@ -1747,8 +1911,9 @@ export const AITestingDashboard: React.FC = () => {
                       <td
                         style={{
                           padding: '12px 16px',
-                          fontFamily: "'Courier New', monospace",
-                          color: '#94a3b8',
+                          fontFamily: 'var(--font-mono)',
+                          color: 'var(--text-muted)',
+                          fontSize: '0.78rem',
                         }}
                       >
                         {plate.time_str}
@@ -1761,8 +1926,10 @@ export const AITestingDashboard: React.FC = () => {
                             display: 'inline-flex',
                             alignItems: 'center',
                             gap: '6px',
-                            color: '#38bdf8',
-                            fontWeight: 600,
+                            color: 'var(--accent-purple)',
+                            fontWeight: 700,
+                            fontFamily: 'var(--font-tactical)',
+                            fontSize: '0.82rem',
                           }}
                         >
                           <Car size={14} />
@@ -1771,7 +1938,7 @@ export const AITestingDashboard: React.FC = () => {
                       </td>
 
                       {/* RTO Jurisdiction */}
-                      <td style={{ padding: '12px 16px', color: '#e2e8f0' }}>
+                      <td style={{ padding: '12px 16px', color: 'var(--text-primary)', fontFamily: 'var(--font-tactical)', fontWeight: 600 }}>
                         {plate.rto_jurisdiction || 'Gujarat State'}
                       </td>
 
@@ -1779,12 +1946,14 @@ export const AITestingDashboard: React.FC = () => {
                       <td style={{ padding: '12px 16px', textAlign: 'right' }}>
                         <span
                           style={{
-                            backgroundColor: '#1e293b',
+                            background: 'var(--bg-tertiary)',
+                            border: '1px solid var(--border-subtle)',
                             padding: '2px 8px',
-                            borderRadius: '4px',
-                            fontSize: '11px',
-                            fontWeight: 700,
-                            color: '#94a3b8',
+                            borderRadius: 'var(--radius-sm)',
+                            fontSize: '0.75rem',
+                            fontWeight: 800,
+                            color: 'var(--text-secondary)',
+                            fontFamily: 'var(--font-mono)',
                           }}
                         >
                           {plate.total_sightings}x
@@ -1801,4 +1970,3 @@ export const AITestingDashboard: React.FC = () => {
     </div>
   );
 };
-

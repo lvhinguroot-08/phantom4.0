@@ -1,6 +1,9 @@
 """
 YOLO26 Object Detector Implementation
+=====================================
 Production singleton inference service with automatic GPU/CPU routing for PHANTOM.
+Employs 3-tier hierarchical classification, specialized secondary feature extractors,
+hard-negative pole filtering, and strict uncertainty handling.
 """
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -14,7 +17,19 @@ import uuid
 import numpy as np
 
 from .config import YOLO26Config
+from .hierarchy import (
+    ClassificationStatus,
+    EventLifecycle,
+    HierarchicalClassificationResult,
+    VisionTaxonomy,
+)
 from .model_loader import YOLO26ModelLoader, get_model_loader
+from .specialized_classifiers import (
+    AutoRickshawDisambiguator,
+    CarSpecializedClassifier,
+    HardNegativePoleFilter,
+    TwoWheelerSpecializedClassifier,
+)
 from .utils import format_bounding_box, normalize_class_name, preprocess_image
 from .vehicle_attributes import VehicleAttributeExtractor
 
@@ -67,30 +82,11 @@ class YOLO26Detector:
         frame: Any,
         confidence_threshold: Optional[float] = None,
         classes: Optional[List[str]] = None,
+        track_id: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """
         Reusable inference method for OpenCV/NumPy image frames.
-        
-        Args:
-            frame: NumPy ndarray (H, W, 3) representing the image in BGR/RGB format.
-            confidence_threshold: Optional override for minimum detection score (0.0 to 1.0).
-            classes: Optional override list of target class names (e.g. ['person', 'car']).
-            
-        Returns:
-            List of detections formatted as:
-            [
-                {
-                    "class_id": 0,
-                    "class_name": "person",
-                    "confidence": 0.96,
-                    "bbox": {
-                        "x1": 100,
-                        "y1": 50,
-                        "x2": 300,
-                        "y2": 450
-                    }
-                }
-            ]
+        Executes primary object detection + secondary hierarchical classification.
         """
         # 1. Invalid Frame Handling
         if frame is None or not isinstance(frame, np.ndarray):
@@ -122,7 +118,7 @@ class YOLO26Detector:
             else {c.lower() for c in self.config.target_classes}
         )
 
-        results_list: List[Dict[str, Any]] = []
+        raw_results_list: List[Dict[str, Any]] = []
 
         # 3. Model Inference Execution
         if self.is_loaded and self.model is not None:
@@ -156,7 +152,6 @@ class YOLO26Detector:
                         clean_name = str(raw_name).strip().lower()
 
                         if allowed_classes_lower and clean_name not in allowed_classes_lower:
-                            # Also check normalized canonical class
                             canon_name = normalize_class_name(raw_name).lower()
                             if canon_name not in allowed_classes_lower:
                                 continue
@@ -170,16 +165,13 @@ class YOLO26Detector:
                         bh = y2 - y1
 
                         if bw < 14 or bh < 14:
-                            continue  # Filter sub-pixel / tiny noise artifacts
+                            continue
 
                         aspect_ratio = bh / float(bw) if bw > 0 else 1.0
-                        box_area = bw * bh
-
-                        # Filter extreme non-physical dimensions
                         if aspect_ratio > 4.8 or aspect_ratio < 0.25:
                             continue
 
-                        results_list.append({
+                        raw_results_list.append({
                             "class_id": cls_id,
                             "class_name": clean_name,
                             "confidence": round(conf, 4),
@@ -188,139 +180,158 @@ class YOLO26Detector:
                                 "y1": y1,
                                 "x2": x2,
                                 "y2": y2,
+                                "width": bw,
+                                "height": bh,
                             },
                         })
-
-                # --- Secondary Post-Processing: Person vs Motorcycle Fusion & Disambiguation ---
-                processed_list: List[Dict[str, Any]] = []
-                suppressed_indices = set()
-
-                for i, det in enumerate(results_list):
-                    if i in suppressed_indices:
-                        continue
-
-                    cname = det["class_name"].lower()
-                    canon = normalize_class_name(cname)
-                    bx = det["bbox"]
-                    bw = bx["x2"] - bx["x1"]
-                    bh = bx["y2"] - bx["y1"]
-                    ar = bh / float(bw) if bw > 0 else 1.0
-                    area = bw * bh
-                    conf = det["confidence"]
-
-                    # 1. Motorcycle & Rider Fusion
-                    if canon == "MOTORCYCLE":
-                        # Check for overlapping 'person' (the rider sitting on the bike)
-                        for j, other in enumerate(results_list):
-                            if i != j and j not in suppressed_indices:
-                                o_canon = normalize_class_name(other["class_name"])
-                                if o_canon == "PERSON":
-                                    obx = other["bbox"]
-                                    # Compute intersection
-                                    ix1 = max(bx["x1"], obx["x1"])
-                                    iy1 = max(bx["y1"], obx["y1"])
-                                    ix2 = min(bx["x2"], obx["x2"])
-                                    iy2 = min(bx["y2"], obx["y2"])
-                                    if ix2 > ix1 and iy2 > iy1:
-                                        inter_area = (ix2 - ix1) * (iy2 - iy1)
-                                        o_area = (obx["x2"] - obx["x1"]) * (obx["y2"] - obx["y1"])
-                                        # If person heavily overlaps motorcycle, merge rider into motorcycle
-                                        if inter_area / float(o_area) > 0.25 or inter_area / float(area) > 0.25:
-                                            suppressed_indices.add(j)
-                                            bx["x1"] = min(bx["x1"], obx["x1"])
-                                            bx["y1"] = min(bx["y1"], obx["y1"])
-                                            bx["x2"] = max(bx["x2"], obx["x2"])
-                                            bx["y2"] = max(bx["y2"], obx["y2"])
-                                            det["confidence"] = max(conf, other["confidence"])
-                        processed_list.append(det)
-
-                    # 2. Person Validation (Keep true pedestrians as PERSON)
-                    elif canon == "PERSON":
-                        # Check if this person overlaps a motorcycle / bicycle
-                        has_moto_overlap = False
-                        for j, other in enumerate(results_list):
-                            if i != j and j not in suppressed_indices:
-                                if normalize_class_name(other["class_name"]) in ("MOTORCYCLE", "BICYCLE"):
-                                    obx = other["bbox"]
-                                    ix1 = max(bx["x1"], obx["x1"])
-                                    iy1 = max(bx["y1"], obx["y1"])
-                                    ix2 = min(bx["x2"], obx["x2"])
-                                    iy2 = min(bx["y2"], obx["y2"])
-                                    if ix2 > ix1 and iy2 > iy1:
-                                        inter_area = (ix2 - ix1) * (iy2 - iy1)
-                                        o_area = (obx["x2"] - obx["x1"]) * (obx["y2"] - obx["y1"])
-                                        if inter_area / float(area) > 0.20 or inter_area / float(o_area) > 0.20:
-                                            has_moto_overlap = True
-                                            break
-                        if has_moto_overlap:
-                            # Subsumed by motorcycle rider fusion
-                            suppressed_indices.add(i)
-                            continue
-
-                        # Keep as true Pedestrian (filter out extreme static poles / ground artifacts)
-                        if 0.80 <= ar <= 4.5:
-                            det["class_name"] = "person"
-                            det["class_id"] = 0
-                            processed_list.append(det)
-
-                    # 3. Auto-Rickshaw & Vehicle Disambiguation
-                    elif canon in ("TRUCK", "CAR", "OTHER_VEHICLE"):
-                        if 0.82 <= ar <= 1.50 and 1200 <= area <= 28000 and canon == "TRUCK":
-                            det["class_name"] = "auto_rickshaw"
-                            det["class_id"] = 80
-                        elif canon == "TRUCK" and area < 8000:
-                            det["class_name"] = "car"
-                            det["class_id"] = 2
-                        processed_list.append(det)
-                    else:
-                        processed_list.append(det)
-
-                return processed_list
-
             except Exception as inference_err:
                 logger.error(f"Inference error in detect_frame: {inference_err}")
 
-        # 4. Deterministic Simulated Traffic Detections (when unweighted/offline)
-        demo_items = [
-            {
-                "class_id": 2,
-                "class_name": "car",
-                "confidence": 0.94,
-                "bbox": {
-                    "x1": int(round(w * 0.12)),
-                    "y1": int(round(h * 0.40)),
-                    "x2": int(round(w * 0.48)),
-                    "y2": int(round(h * 0.82)),
-                },
-            },
-            {
-                "class_id": 0,
-                "class_name": "person",
-                "confidence": 0.89,
-                "bbox": {
-                    "x1": int(round(w * 0.72)),
-                    "y1": int(round(h * 0.42)),
-                    "x2": int(round(w * 0.88)),
-                    "y2": int(round(h * 0.88)),
-                },
-            },
-            {
-                "class_id": 3,
-                "class_name": "motorcycle",
-                "confidence": 0.91,
-                "bbox": {
-                    "x1": int(round(w * 0.52)),
-                    "y1": int(round(h * 0.48)),
-                    "x2": int(round(w * 0.68)),
-                    "y2": int(round(h * 0.84)),
-                },
-            },
-        ]
-        return [
-            d for d in demo_items
-            if (not allowed_classes_lower or d["class_name"] in allowed_classes_lower)
-            and d["confidence"] >= conf_thresh
-        ]
+        # 4. Secondary Hierarchical Classification & Hard-Negative Filtering
+        processed_list: List[Dict[str, Any]] = []
+        suppressed_indices = set()
+
+        for i, det in enumerate(raw_results_list):
+            if i in suppressed_indices:
+                continue
+
+            cname = det["class_name"].lower()
+            canon = normalize_class_name(cname)
+            bx = det["bbox"]
+            bw = bx["width"]
+            bh = bx["height"]
+            conf = det["confidence"]
+
+            # Extract image crop with contextual padding
+            pad_x = int(bw * 0.08)
+            pad_y = int(bh * 0.08)
+            cx1 = max(0, bx["x1"] - pad_x)
+            cy1 = max(0, bx["y1"] - pad_y)
+            cx2 = min(w, bx["x2"] + pad_x)
+            cy2 = min(h, bx["y2"] + pad_y)
+            crop = frame[cy1:cy2, cx1:cx2] if (cx2 > cx1 + 4 and cy2 > cy1 + 4) else None
+
+            # --- HARD NEGATIVE PERSON / POLE FILTERING ---
+            if canon == "PERSON":
+                # Check for motorcycle rider fusion
+                has_moto_overlap = False
+                for j, other in enumerate(raw_results_list):
+                    if i != j and j not in suppressed_indices:
+                        if normalize_class_name(other["class_name"]) in ("MOTORCYCLE", "TWO_WHEELER", "SCOOTER", "BICYCLE"):
+                            obx = other["bbox"]
+                            ix1 = max(bx["x1"], obx["x1"])
+                            iy1 = max(bx["y1"], obx["y1"])
+                            ix2 = min(bx["x2"], obx["x2"])
+                            iy2 = min(bx["y2"], obx["y2"])
+                            if ix2 > ix1 and iy2 > iy1:
+                                inter_area = (ix2 - ix1) * (iy2 - iy1)
+                                o_area = max(1, obx["width"] * obx["height"])
+                                if inter_area / float(o_area) > 0.22 or inter_area / float(bw * bh) > 0.22:
+                                    has_moto_overlap = True
+                                    break
+                if has_moto_overlap:
+                    suppressed_indices.add(i)
+                    continue
+
+                # Run Hard-Negative Pole / Streetlight Filter
+                is_pole, reason = HardNegativePoleFilter.is_hard_negative_pole(crop, bx, detector_conf=conf)
+                if is_pole:
+                    # Filter out pole false-positives
+                    logger.debug(f"Hard-negative pole filtered: {reason}")
+                    continue
+
+                h_res = HierarchicalClassificationResult(
+                    category="PERSON",
+                    category_confidence=conf,
+                    subtype="PEDESTRIAN",
+                    subtype_confidence=conf,
+                    classification_status=ClassificationStatus.CONFIDENT if conf >= 0.75 else ClassificationStatus.LIKELY,
+                    display_label=VisionTaxonomy.format_tactical_label("PERSON", confidence=conf, status=ClassificationStatus.CONFIDENT),
+                )
+                det["object_class"] = "PERSON"
+                det["hierarchical_result"] = h_res
+                processed_list.append(det)
+
+            # --- TWO-WHEELER CLASSIFIER (SCOOTER vs MOTORCYCLE) ---
+            elif canon in ("TWO_WHEELER", "MOTORCYCLE", "SCOOTER"):
+                h_res = TwoWheelerSpecializedClassifier.classify_crop(
+                    crop_bgr=crop,
+                    bbox=bx,
+                    raw_conf=conf,
+                    track_id=track_id,
+                )
+                det["object_class"] = h_res.category
+                det["hierarchical_result"] = h_res
+                processed_list.append(det)
+
+            # --- CAR / HATCHBACK / WAGONR vs SWIFT CLASSIFIER ---
+            elif canon in ("CAR", "HATCHBACK", "SEDAN", "SUV"):
+                # Check for 3-wheeler auto-rickshaw misclassification
+                is_auto, auto_conf = AutoRickshawDisambiguator.is_auto_rickshaw(crop, bx, canon, conf)
+                if is_auto:
+                    h_res = HierarchicalClassificationResult(
+                        category="AUTO_RICKSHAW",
+                        category_confidence=auto_conf,
+                        subtype="AUTO_RICKSHAW",
+                        make="Bajaj",
+                        model="Compact Auto",
+                        model_confidence=auto_conf,
+                        classification_status=ClassificationStatus.CONFIDENT if auto_conf >= 0.75 else ClassificationStatus.LIKELY,
+                        display_label=VisionTaxonomy.format_tactical_label("AUTO_RICKSHAW", make="Bajaj", model="Compact Auto", confidence=auto_conf, status=ClassificationStatus.CONFIDENT),
+                    )
+                    det["object_class"] = "AUTO_RICKSHAW"
+                else:
+                    h_res = CarSpecializedClassifier.classify_crop(
+                        crop_bgr=crop,
+                        bbox=bx,
+                        raw_conf=conf,
+                        track_id=track_id,
+                    )
+                    det["object_class"] = "CAR"
+
+                det["hierarchical_result"] = h_res
+                processed_list.append(det)
+
+            # --- TRUCK / AUTO-RICKSHAW DISAMBIGUATION ---
+            elif canon in ("TRUCK", "VAN", "BUS", "OTHER_VEHICLE"):
+                is_auto, auto_conf = AutoRickshawDisambiguator.is_auto_rickshaw(crop, bx, canon, conf)
+                if is_auto:
+                    h_res = HierarchicalClassificationResult(
+                        category="AUTO_RICKSHAW",
+                        category_confidence=auto_conf,
+                        subtype="AUTO_RICKSHAW",
+                        make="Bajaj",
+                        model="Compact Auto",
+                        model_confidence=auto_conf,
+                        classification_status=ClassificationStatus.CONFIDENT if auto_conf >= 0.75 else ClassificationStatus.LIKELY,
+                        display_label=VisionTaxonomy.format_tactical_label("AUTO_RICKSHAW", make="Bajaj", model="Compact Auto", confidence=auto_conf, status=ClassificationStatus.CONFIDENT),
+                    )
+                    det["object_class"] = "AUTO_RICKSHAW"
+                else:
+                    h_res = HierarchicalClassificationResult(
+                        category=canon,
+                        category_confidence=conf,
+                        subtype=canon,
+                        classification_status=ClassificationStatus.CONFIDENT if conf >= 0.78 else ClassificationStatus.LIKELY,
+                        display_label=VisionTaxonomy.format_tactical_label(canon, confidence=conf, status=ClassificationStatus.CONFIDENT),
+                    )
+                    det["object_class"] = canon
+
+                det["hierarchical_result"] = h_res
+                processed_list.append(det)
+
+            else:
+                h_res = HierarchicalClassificationResult(
+                    category=canon,
+                    category_confidence=conf,
+                    classification_status=ClassificationStatus.CONFIDENT if conf >= 0.78 else ClassificationStatus.LIKELY,
+                    display_label=VisionTaxonomy.format_tactical_label(canon, confidence=conf, status=ClassificationStatus.CONFIDENT),
+                )
+                det["object_class"] = canon
+                det["hierarchical_result"] = h_res
+                processed_list.append(det)
+
+        return processed_list
 
     def detect(
         self,
@@ -329,7 +340,8 @@ class YOLO26Detector:
         timestamp: Optional[datetime] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Comprehensive detection returning enriched vehicle attributes and tracking metadata.
+        Comprehensive detection pipeline returning enriched vehicle attributes,
+        hierarchical classification metadata, and tracking compatibility.
         """
         ts = timestamp or datetime.now(timezone.utc)
         cam_id = str(camera_id or uuid.uuid4())
@@ -344,15 +356,14 @@ class YOLO26Detector:
         if frame_np is None:
             return []
 
-        h, w = frame_np.shape[:2]
+        standard_dets = self.detect_frame(frame_np)
         detections: List[Dict[str, Any]] = []
 
-        standard_dets = self.detect_frame(frame_np)
-
         for d in standard_dets:
-            canon_class = normalize_class_name(d["class_name"])
+            canon_class = d.get("object_class") or normalize_class_name(d["class_name"])
             bx = d["bbox"]
             det_id = str(uuid.uuid4())
+            h_res = d.get("hierarchical_result")
 
             det_item = {
                 "detection_id": det_id,
@@ -372,7 +383,10 @@ class YOLO26Detector:
                 "model_version": self.config.model_version,
                 "device": self.device,
                 "is_demo": not self.is_loaded,
-                "raw_class": d["class_name"],
+                "raw_class": d.get("class_name", canon_class),
+                "hierarchical_result": h_res,
+                "classification_status": h_res.classification_status.value if h_res else ClassificationStatus.UNKNOWN.value,
+                "display_label": h_res.display_label if h_res else "",
             }
             # Enrich with vehicle attributes
             det_item = VehicleAttributeExtractor.enrich_detection(det_item, frame_np, cam_id)

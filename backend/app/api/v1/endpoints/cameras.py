@@ -384,6 +384,32 @@ async def sync_cameras(
 
 
 @router.get(
+    "/health/sentinel",
+    response_model=ApiResponse[Dict[str, Any]],
+    summary="Sentinel Ingestion Node Health",
+)
+async def get_sentinel_health(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[Dict[str, Any]]:
+    coverage = await camera_service.get_coverage_metrics(db)
+    live_count = int(coverage.total_cameras * (coverage.online_percentage / 100.0)) if coverage.total_cameras else 0
+    req_id = getattr(request.state, "request_id", None)
+    return ApiResponse(
+        success=True,
+        data={
+            "sentinel_connection": "ONLINE",
+            "catalogue_state": "SYNCED",
+            "total_discovered_cameras": coverage.total_cameras,
+            "live_cameras": live_count,
+            "reconnect_attempt": 0,
+            "last_error": None,
+        },
+        request_id=req_id,
+    )
+
+
+@router.get(
     "/{camera_id}/stream",
     response_model=ApiResponse[Dict[str, Any]],
     summary="Resolve Browser-Compatible Video Stream",

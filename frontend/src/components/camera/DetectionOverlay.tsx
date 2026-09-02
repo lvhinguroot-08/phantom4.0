@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { ShieldAlert, Car, User, Bike, Truck, Sparkles, Activity, Eye, Zap } from 'lucide-react';
+import { ShieldAlert, Car, User, Bike, Truck, Sparkles, Activity, Eye, Zap, AlertCircle } from 'lucide-react';
 
 export interface DetectionAttribute {
   is_vehicle?: boolean;
@@ -7,6 +7,7 @@ export interface DetectionAttribute {
   make?: string;
   model?: string;
   display_name?: string;
+  classification_status?: 'CONFIDENT' | 'LIKELY' | 'UNCERTAIN' | 'UNKNOWN';
   color?: string;
   color_hex?: string;
   color_confidence?: number;
@@ -38,9 +39,12 @@ export interface LiveDetectionItem {
   dwell_time?: number;
   movement_direction?: string;
   display_label?: string;
+  classification_status?: 'CONFIDENT' | 'LIKELY' | 'UNCERTAIN' | 'UNKNOWN';
+  event_lifecycle?: 'DETECTED' | 'TRACKING' | 'CONFIRMED' | 'ENDED';
   bounding_box: BoundingBox;
   attributes?: DetectionAttribute;
   is_watchlist_match?: boolean;
+  is_hard_negative?: boolean;
   threat_level?: 'NORMAL' | 'ELEVATED' | 'CRITICAL';
 }
 
@@ -86,114 +90,6 @@ export const DetectionOverlay: React.FC<DetectionOverlayProps> = ({
   });
   const [selectedDet, setSelectedDet] = useState<LiveDetectionItem | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
-  const animFrameRef = useRef<number | null>(null);
-
-  // Generate fallback smooth client animation if WS is offline
-  const generateClientFallback = useCallback((frameSeq: number) => {
-    const t = frameSeq * 0.06;
-    const camSeed = (cameraId || 'CAM').split('').reduce((acc, c) => acc + c.charCodeAt(0), 0) % 100;
-    const isWl = camSeed % 3 === 0;
-
-    const carX = Math.sin(t * 0.4 + camSeed) * 0.22 + 0.38;
-    const carY = 0.40 + Math.cos(t * 0.25 + camSeed) * 0.03;
-    const carW = 0.34;
-    const carH = 0.36;
-
-    const bikeX = Math.cos(t * 0.5 + camSeed + 1.2) * 0.18 + 0.68;
-    const bikeY = 0.46 + Math.sin(t * 0.3 + camSeed) * 0.02;
-    const bikeW = 0.15;
-    const bikeH = 0.30;
-
-    const pedX = 0.82 + Math.sin(t * 0.25 + camSeed) * 0.05;
-    const pedY = 0.38 + Math.cos(t * 0.2 + camSeed) * 0.02;
-
-    const plate1 = isWl ? 'GJ05AB1234' : `GJ01AK${1000 + (camSeed * 37) % 8999}`;
-    const plate2 = `GJ27CD${2000 + (camSeed * 41) % 7999}`;
-
-    const items: LiveDetectionItem[] = [
-      {
-        detection_id: `det-car-${cameraId}`,
-        object_class: 'CAR',
-        confidence: 0.96,
-        bounding_box: {
-          x1: Math.max(2, (carX - carW / 2) * 100),
-          y1: Math.max(5, (carY - carH / 2) * 100),
-          x2: Math.min(98, (carX + carW / 2) * 100),
-          y2: Math.min(95, (carY + carH / 2) * 100),
-          width: carW * 100,
-          height: carH * 100,
-        },
-        attributes: {
-          is_vehicle: true,
-          structure_type: camSeed % 2 === 0 ? 'SUV' : 'SEDAN',
-          make: camSeed % 2 === 0 ? 'Hyundai' : 'Maruti Suzuki',
-          model: camSeed % 2 === 0 ? 'Creta' : 'Dzire',
-          display_name: camSeed % 2 === 0 ? 'Hyundai Creta' : 'Maruti Suzuki Dzire',
-          color: camSeed % 3 === 0 ? 'White' : camSeed % 3 === 1 ? 'Silver / Grey' : 'Black',
-          color_hex: camSeed % 3 === 0 ? '#F8FAFC' : camSeed % 3 === 1 ? '#94A3B8' : '#1E293B',
-          color_confidence: 0.95,
-          license_plate: plate1,
-          plate_confidence: 0.98,
-          speed_kmph: Math.round(42.5 + Math.sin(t) * 4.0),
-        },
-        is_watchlist_match: isWl,
-        threat_level: isWl ? 'CRITICAL' : 'NORMAL',
-      },
-      {
-        detection_id: `det-bike-${cameraId}`,
-        object_class: 'MOTORCYCLE',
-        confidence: 0.92,
-        bounding_box: {
-          x1: Math.max(2, (bikeX - bikeW / 2) * 100),
-          y1: Math.max(5, (bikeY - bikeH / 2) * 100),
-          x2: Math.min(98, (bikeX + bikeW / 2) * 100),
-          y2: Math.min(95, (bikeY + bikeH / 2) * 100),
-          width: bikeW * 100,
-          height: bikeH * 100,
-        },
-        attributes: {
-          is_vehicle: true,
-          structure_type: 'TWO_WHEELER',
-          make: 'Honda',
-          model: 'Activa 6G',
-          display_name: 'Honda Activa 6G',
-          color: camSeed % 2 === 0 ? 'Red' : 'Blue',
-          color_hex: camSeed % 2 === 0 ? '#EF4444' : '#3B82F6',
-          color_confidence: 0.91,
-          license_plate: plate2,
-          plate_confidence: 0.94,
-          speed_kmph: Math.round(33.0 + Math.cos(t) * 3.0),
-        },
-        is_watchlist_match: false,
-        threat_level: 'NORMAL',
-      },
-      {
-        detection_id: `det-ped-${cameraId}`,
-        object_class: 'PERSON',
-        confidence: 0.89,
-        bounding_box: {
-          x1: Math.max(2, (pedX - 0.06) * 100),
-          y1: Math.max(5, (pedY - 0.22) * 100),
-          x2: Math.min(98, (pedX + 0.06) * 100),
-          y2: Math.min(95, (pedY + 0.22) * 100),
-          width: 12,
-          height: 44,
-        },
-        attributes: {
-          is_vehicle: false,
-          structure_type: 'PEDESTRIAN',
-          activity: 'Walking',
-          helmet_detected: false,
-          threat_level: 'NORMAL',
-        },
-        is_watchlist_match: false,
-        threat_level: 'NORMAL',
-      },
-    ];
-
-    setDetections(items);
-    setAiStats({ fps: 25, latency: 16, objects: items.length });
-  }, [cameraId]);
 
   // Connect to live detection endpoint and WebSocket
   useEffect(() => {
@@ -211,7 +107,6 @@ export const DetectionOverlay: React.FC<DetectionOverlayProps> = ({
     }
 
     let isMounted = true;
-    let frameCounter = 0;
 
     // 1. Initial snapshot fetch
     fetch(`/api/v1/streams/${encodeURIComponent(cameraId)}/detections/live`)
@@ -227,7 +122,7 @@ export const DetectionOverlay: React.FC<DetectionOverlayProps> = ({
         }
       })
       .catch(() => {
-        if (isMounted) generateClientFallback(0);
+        // Safe empty state on error (no fake hallucinated bounding boxes)
       });
 
     // 2. WebSocket Real-time live HUD stream with auto-reconnection
@@ -236,7 +131,6 @@ export const DetectionOverlay: React.FC<DetectionOverlayProps> = ({
     const wsHost = host.includes(':3000') ? host.replace(':3000', ':8000') : host;
     const wsUrl = `${protocol}//${wsHost}/api/v1/streams/${encodeURIComponent(cameraId)}/detections/ws?fps=15`;
 
-    let useLocalTicker = false;
     let reconnectTimeout: number | null = null;
 
     const connectWs = () => {
@@ -244,10 +138,6 @@ export const DetectionOverlay: React.FC<DetectionOverlayProps> = ({
       try {
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
-
-        ws.onopen = () => {
-          useLocalTicker = false;
-        };
 
         ws.onmessage = (event) => {
           if (!isMounted) return;
@@ -263,22 +153,16 @@ export const DetectionOverlay: React.FC<DetectionOverlayProps> = ({
               });
             }
           } catch {
-            // ignore
+            // ignore malformed frame
           }
         };
 
-        ws.onerror = () => {
-          useLocalTicker = true;
-        };
-
         ws.onclose = () => {
-          useLocalTicker = true;
           if (isMounted) {
             reconnectTimeout = window.setTimeout(connectWs, 3000);
           }
         };
       } catch {
-        useLocalTicker = true;
         if (isMounted) {
           reconnectTimeout = window.setTimeout(connectWs, 3000);
         }
@@ -287,28 +171,15 @@ export const DetectionOverlay: React.FC<DetectionOverlayProps> = ({
 
     connectWs();
 
-    // 3. Smooth continuous animation ticker
-    const tick = () => {
-      if (!isMounted) return;
-      frameCounter++;
-      if (useLocalTicker) {
-        generateClientFallback(frameCounter);
-      }
-      animFrameRef.current = requestAnimationFrame(tick);
-    };
-
-    animFrameRef.current = requestAnimationFrame(tick);
-
     return () => {
       isMounted = false;
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
-      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;
       }
     };
-  }, [cameraId, isEnabled, customDetections, generateClientFallback]);
+  }, [cameraId, isEnabled, customDetections]);
 
   if (!isEnabled || detections.length === 0) {
     return null;
@@ -336,7 +207,7 @@ export const DetectionOverlay: React.FC<DetectionOverlayProps> = ({
         icon: <User size={12} />,
       };
     }
-    if (cls === 'MOTORCYCLE' || cls === 'TWO_WHEELER' || cls === 'BICYCLE') {
+    if (cls === 'MOTORCYCLE' || cls === 'TWO_WHEELER' || cls === 'SCOOTER' || cls === 'BICYCLE') {
       return {
         color: '#C084FC',
         border: 'rgba(192, 132, 252, 0.95)',
@@ -344,6 +215,16 @@ export const DetectionOverlay: React.FC<DetectionOverlayProps> = ({
         badgeBg: '#9333EA',
         badgeText: '#FFFFFF',
         icon: <Bike size={12} />,
+      };
+    }
+    if (cls === 'AUTO_RICKSHAW') {
+      return {
+        color: '#FACC15',
+        border: 'rgba(250, 204, 21, 0.95)',
+        bg: 'rgba(250, 204, 21, 0.16)',
+        badgeBg: '#CA8A04',
+        badgeText: '#08131E',
+        icon: <Car size={12} />,
       };
     }
     if (cls === 'TRUCK' || cls === 'BUS') {
@@ -381,9 +262,9 @@ export const DetectionOverlay: React.FC<DetectionOverlayProps> = ({
             boxShadow: '0 0 6px #34d399',
           }}
         />
-        <span>YOLO26 HUD ACTIVE</span>
+        <span>YOLO26 HIERARCHICAL AI</span>
         <span style={{ color: '#64748b' }}>|</span>
-        <span>{aiStats.objects} OBJECTS</span>
+        <span>{aiStats.objects} ACTIVE TRACKS</span>
         <span style={{ color: '#64748b' }}>|</span>
         <span>{aiStats.fps} FPS</span>
       </div>
@@ -395,9 +276,10 @@ export const DetectionOverlay: React.FC<DetectionOverlayProps> = ({
 
         const theme = getClassTheme(det);
         const attr = det.attributes || {};
-        const isCar = attr.is_vehicle || det.object_class === 'CAR';
+        const isCar = attr.is_vehicle || det.object_class === 'CAR' || det.object_class === 'TWO_WHEELER' || det.object_class === 'AUTO_RICKSHAW';
         const hasPlate = showPlates && Boolean(attr.license_plate);
         const confidencePct = Math.round((det.confidence || 0.9) * 100);
+        const cStatus = det.classification_status || attr.classification_status || 'CONFIDENT';
 
         return (
           <div
@@ -435,7 +317,7 @@ export const DetectionOverlay: React.FC<DetectionOverlayProps> = ({
                 style={{ backgroundColor: theme.color }}
               />
 
-              {/* Top Label & Classification Tag (e.g. Person 96%, Car 93%) */}
+              {/* Top Label & Classification Tag (e.g. Person 96%, Car #7 | WagonR 84%) */}
               {showLabels && (
                 <div
                   className="phantom-box-top-tag"
@@ -458,8 +340,8 @@ export const DetectionOverlay: React.FC<DetectionOverlayProps> = ({
               {/* Bottom Metadata Badges (Make/Model, Color, License Plate) */}
               {showAttributes && (isCar || hasPlate) && (
                 <div className="phantom-box-bottom-badges">
-                  {/* Make & Model Badge */}
-                  {isCar && attr.display_name && (
+                  {/* Make & Model Badge (Only when not uncertain) */}
+                  {isCar && attr.display_name && cStatus !== 'UNCERTAIN' && (
                     <div
                       className="phantom-badge-pill"
                       style={{
@@ -468,6 +350,20 @@ export const DetectionOverlay: React.FC<DetectionOverlayProps> = ({
                       }}
                     >
                       <span>{attr.display_name}</span>
+                    </div>
+                  )}
+
+                  {/* Uncertainty Status Pill */}
+                  {cStatus === 'UNCERTAIN' && (
+                    <div
+                      className="phantom-badge-pill"
+                      style={{
+                        color: '#FDE047',
+                        borderColor: 'rgba(250, 204, 21, 0.5)',
+                        backgroundColor: 'rgba(250, 204, 21, 0.15)',
+                      }}
+                    >
+                      <span>Model Uncertain</span>
                     </div>
                   )}
 

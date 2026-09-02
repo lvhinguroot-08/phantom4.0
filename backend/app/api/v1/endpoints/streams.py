@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import FileResponse, Response as RawResponse, StreamingResponse
@@ -21,78 +21,215 @@ router = APIRouter(tags=["Camera Streams & Ingest"])
 stream_service = StreamService()
 
 
-# ------------------------------------------------------------------------------
-# 1. Direct Live Stream Gateway Endpoints (Video / HLS / Proxy / Lifecycle)
-# ------------------------------------------------------------------------------
+def find_stream_asset(filename: str) -> Optional[Path]:
+    candidates = [
+        Path(__file__).resolve().parent.parent.parent.parent.parent / "sample_assets" / filename,
+        Path(__file__).resolve().parent.parent.parent.parent.parent / "backend" / "sample_assets" / filename,
+        Path.cwd() / "sample_assets" / filename,
+        Path.cwd() / "backend" / "sample_assets" / filename,
+    ]
+    for c in candidates:
+        if c.is_file():
+            return c
+    return None
+
+def get_sample_dirs() -> List[Path]:
+    dirs = [
+        Path(__file__).resolve().parent.parent.parent.parent.parent / "sample_assets",
+        Path(__file__).resolve().parent.parent.parent.parent.parent / "backend" / "sample_assets",
+        Path.cwd() / "sample_assets",
+        Path.cwd() / "backend" / "sample_assets",
+    ]
+    return [d for d in dirs if d.is_dir()]
+
+
+import asyncio
+import httpx
+
+
+@router.api_route(
+    "/streams/{camera_id}/whep",
+    methods=["POST", "OPTIONS", "PATCH", "DELETE"],
+    summary="WebRTC WHEP Stream Proxy",
+    description="Proxies WebRTC WHEP negotiation directly to low-latency stream gateway for 0-latency live CCTV playback.",
+)
+async def proxy_whep_stream(
+    camera_id: str,
+    request: Request,
+):
+    clean_id = camera_id.strip().lower()
+    digits = re.sub(r"\D", "", clean_id)
+    stream_id = f"cam{digits.zfill(2)}" if digits else clean_id
+    target_url = f"http://103.250.160.189:8889/stream/{stream_id}/whep"
+
+    cors_headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS, PATCH, DELETE, GET",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization, If-Match",
+        "Access-Control-Expose-Headers": "Location, Accept-Post, Link",
+    }
+
+    if request.method == "OPTIONS":
+        return RawResponse(status_code=204, headers=cors_headers)
+
+    body = await request.body()
+    client = await stream_gateway_service.get_http_client()
+    try:
+        upstream_resp = await client.request(
+            method=request.method,
+            url=target_url,
+            content=body,
+            headers={
+                "Content-Type": request.headers.get("Content-Type", "application/sdp"),
+            },
+            timeout=10.0,
+        )
+        response_headers = dict(cors_headers)
+        if "location" in upstream_resp.headers:
+            response_headers["Location"] = upstream_resp.headers["location"]
+        if "content-type" in upstream_resp.headers:
+            response_headers["Content-Type"] = upstream_resp.headers["content-type"]
+        else:
+            response_headers["Content-Type"] = "application/sdp"
+
+        return RawResponse(
+            content=upstream_resp.content,
+            status_code=upstream_resp.status_code,
+            headers=response_headers,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"WHEP gateway proxy error: {str(exc)}")
+
 
 @router.get(
+    "/streams/{camera_id}/live.mjpg",
+    summary="Live Motion-JPEG Continuous Video Stream",
+    description="Streams real-time live frames from RTSP camera feed over continuous HTTP multipart stream.",
+)
+@router.get("/streams/{camera_id}/live.mjpeg")
+async def get_live_mjpeg_stream(
+    camera_id: str,
+    request: Request,
+    fps: int = Query(20, ge=1, le=30),
+):
+    clean_id = camera_id.strip().lower()
+    digits = re.sub(r"\D", "", clean_id)
+    stream_id = f"cam{digits.zfill(2)}" if digits else clean_id
+
+    async def frame_generator():
+        import cv2
+        delay = 1.0 / max(1, fps)
+        while True:
+            if await request.is_disconnected():
+                break
+            success, frame, pts, _ = stream_gateway_service.read_camera_frame(stream_id)
+            if success and frame is not None and frame.size > 0:
+                ret, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
+                if ret:
+                    yield (
+                        b"--frame\r\n"
+                        b"Content-Type: image/jpeg\r\n\r\n" + jpeg.tobytes() + b"\r\n"
+                    )
+            await asyncio.sleep(delay)
+
+    return StreamingResponse(
+        frame_generator(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
+
+
+@router.get(
+    "/streams/{camera_id}/snapshot.jpg",
+    summary="Live Camera Snapshot",
+    description="Captures and returns the latest live JPEG frame from the RTSP camera stream.",
+)
+async def get_camera_snapshot_jpg(
+    camera_id: str,
+    request: Request,
+):
+    import cv2
+    clean_id = camera_id.strip().lower()
+    digits = re.sub(r"\D", "", clean_id)
+    stream_id = f"cam{digits.zfill(2)}" if digits else clean_id
+
+    success, frame, pts, _ = stream_gateway_service.read_camera_frame(stream_id)
+    if success and frame is not None and frame.size > 0:
+        ret, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        if ret:
+            return RawResponse(
+                content=jpeg.tobytes(),
+                media_type="image/jpeg",
+                headers={
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                    "Access-Control-Allow-Origin": "*",
+                },
+            )
+    raise HTTPException(status_code=503, detail="Unable to capture live frame from camera")
+
+
+@router.api_route(
+    "/streams/{camera_id}/live.mp4",
+    methods=["GET", "HEAD"],
+    summary="Direct Progressive MP4 Live Stream / Loop",
+    description="Streams 1080p live CCTV video loop directly to browser for smooth continuous playback.",
+)
+@router.api_route(
     "/streams/{camera_id}/video.mp4",
+    methods=["GET", "HEAD"],
     summary="Get Direct Live Video Stream for Camera",
-    description="Streams binary MP4 CCTV footage directly to the browser player with HTTP 206 partial content support.",
+    description="Streams binary MP4 CCTV footage directly to the browser player.",
 )
 async def get_live_video_stream(
     camera_id: str,
     request: Request,
 ):
-    video_path = stream_gateway_service.get_camera_video_path(camera_id)
-    if not video_path or not video_path.is_file():
-        candidates = [
-            Path(__file__).resolve().parent.parent.parent.parent / "sample_assets" / "sample_traffic_cctv.mp4",
-            Path(__file__).resolve().parent.parent.parent.parent.parent / "sample_assets" / "sample_traffic_cctv.mp4",
-        ]
-        for c in candidates:
-            if c.is_file():
-                video_path = c
-                break
+    clean_id = camera_id.strip().lower()
+    digits = re.sub(r"\D", "", clean_id)
+    filenames = [
+        f"{clean_id}_sample.mp4",
+        f"{clean_id}.mp4",
+        f"cam{digits}_sample.mp4" if digits else None,
+        f"cam{digits.zfill(2)}_sample.mp4" if digits else None,
+        f"{clean_id}_real_cctv.mp4",
+        "sample_traffic_cctv.mp4",
+        "cam01_sample.mp4",
+    ]
+    for fn in filenames:
+        if fn:
+            found = find_stream_asset(fn)
+            if found and found.is_file():
+                return FileResponse(
+                    path=str(found),
+                    media_type="video/mp4",
+                    headers={
+                        "Accept-Ranges": "bytes",
+                        "Access-Control-Allow-Origin": "*",
+                        "Cache-Control": "public, max-age=3600",
+                    },
+                )
 
-    if not video_path or not video_path.is_file():
-        raise HTTPException(status_code=404, detail="Camera video footage not found.")
-
-    file_size = video_path.stat().st_size
-    range_header = request.headers.get("Range") or request.headers.get("range")
-
-    if range_header:
-        range_match = re.match(r"bytes=(\d+)-(\d*)", range_header)
-        if range_match:
-            start = int(range_match.group(1))
-            end = int(range_match.group(2)) if range_match.group(2) else file_size - 1
-            start = max(0, min(start, file_size - 1))
-            end = max(start, min(end, file_size - 1))
-            chunk_length = (end - start) + 1
-
-            def iter_file(path_obj: Path, offset: int, length: int):
-                with open(path_obj, "rb") as f:
-                    f.seek(offset)
-                    rem = length
-                    while rem > 0:
-                        buf = f.read(min(rem, 64 * 1024))
-                        if not buf:
-                            break
-                        rem -= len(buf)
-                        yield buf
-
-            return StreamingResponse(
-                iter_file(video_path, start, chunk_length),
-                status_code=status.HTTP_206_PARTIAL_CONTENT,
+    # Fallback to any mp4 in sample dirs
+    for sdir in get_sample_dirs():
+        all_mp4s = list(sdir.glob("*.mp4"))
+        if all_mp4s:
+            return FileResponse(
+                path=str(all_mp4s[0]),
+                media_type="video/mp4",
                 headers={
-                    "Content-Range": f"bytes {start}-{end}/{file_size}",
                     "Accept-Ranges": "bytes",
-                    "Content-Length": str(chunk_length),
-                    "Content-Type": "video/mp4",
                     "Access-Control-Allow-Origin": "*",
                     "Cache-Control": "public, max-age=3600",
                 },
             )
 
-    return FileResponse(
-        path=str(video_path),
-        media_type="video/mp4",
-        headers={
-            "Accept-Ranges": "bytes",
-            "Access-Control-Allow-Origin": "*",
-            "Cache-Control": "public, max-age=3600",
-        },
-    )
+    raise HTTPException(status_code=404, detail=f"No video asset found for {camera_id}")
+
 
 @router.get(
     "/streams/{camera_id}/live.m3u8",

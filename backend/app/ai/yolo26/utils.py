@@ -1,6 +1,7 @@
 """
 YOLO26 Utility Functions
-Bounding box parsing, class mapping, tensor transformations, and image preprocessing.
+========================
+Authoritative bounding box formatting, class normalization, and image preprocessing.
 """
 from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
@@ -18,11 +19,12 @@ COCO_TO_PHANTOM_CLASSES: Dict[Union[int, str], str] = {
     "suv": "CAR",
     "hatchback": "CAR",
     "taxi": "CAR",
-    3: "MOTORCYCLE",
+    3: "TWO_WHEELER",
     "motorcycle": "MOTORCYCLE",
     "motorbike": "MOTORCYCLE",
-    "scooter": "MOTORCYCLE",
-    "two_wheeler": "MOTORCYCLE",
+    "scooter": "SCOOTER",
+    "two_wheeler": "TWO_WHEELER",
+    "two-wheeler": "TWO_WHEELER",
     5: "BUS",
     "bus": "BUS",
     "minibus": "BUS",
@@ -34,6 +36,7 @@ COCO_TO_PHANTOM_CLASSES: Dict[Union[int, str], str] = {
     "van": "VAN",
     "auto_rickshaw": "AUTO_RICKSHAW",
     "autorickshaw": "AUTO_RICKSHAW",
+    "auto": "AUTO_RICKSHAW",
     "rickshaw": "AUTO_RICKSHAW",
     "tuk_tuk": "AUTO_RICKSHAW",
     "tuktuk": "AUTO_RICKSHAW",
@@ -45,7 +48,7 @@ COCO_TO_PHANTOM_CLASSES: Dict[Union[int, str], str] = {
 
 
 def normalize_class_name(raw_name: Union[int, str]) -> str:
-    if isinstance(raw_name, int) or (isinstance(raw_name, str) and raw_name.isdigit()):
+    if isinstance(raw_name, int) or (isinstance(raw_name, str) and str(raw_name).isdigit()):
         return COCO_TO_PHANTOM_CLASSES.get(int(raw_name), "OTHER_VEHICLE")
     
     token = str(raw_name).strip().lower().replace("-", "_").replace(" ", "_")

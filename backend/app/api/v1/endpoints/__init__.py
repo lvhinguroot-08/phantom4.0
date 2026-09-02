@@ -20,6 +20,7 @@ from app.api.v1.endpoints.events import router as events_router
 from app.api.v1.endpoints.incidents import router as incidents_router
 from app.api.v1.endpoints.investigations import router as investigations_router
 from app.api.v1.endpoints.audit import router as audit_router
+from app.api.v1.endpoints.copilot import router as copilot_router
 
 __all__ = [
     "departments_router",
@@ -44,4 +45,5 @@ __all__ = [
     "investigations_router",
     "evidence_router",
     "audit_router",
+    "copilot_router",
 ]

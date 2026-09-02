@@ -1,13 +1,15 @@
 """
-YOLO26 Multi-Object Tracking & Trajectory Engine
-Maintains persistent track IDs, movement direction, dwell time, and velocity estimates within individual camera streams.
-Strictly isolated per-camera tracking without facial recognition or cross-camera assumptions.
+YOLO26 Multi-Object Tracking & Temporal Fusion Engine
+=====================================================
+Maintains persistent track IDs, movement direction, dwell time, velocity estimates,
+hierarchical classification stability, and multi-frame temporal voting per camera stream.
 
-Hardware Presentation Timestamp (PTS) Driven:
-- Dwell time and speed are strictly calculated using real ΔPTS (CAP_PROP_POS_MSEC)
-- Never relies on wall-clock arrival time or assumed constant FPS
-- Tolerates variable inter-frame intervals and network jitter
-- Detects video loops and hard scene cuts to reconcile stale tracks
+Key Features:
+- Real hardware PTS presentation timing (CAP_PROP_POS_MSEC)
+- Temporal score aggregation and label hysteresis (prevents label flipping)
+- Hard negative suppression across track trajectories
+- Structured classification status: CONFIDENT | LIKELY | UNCERTAIN | UNKNOWN
+- Event Lifecycle: DETECTED -> TRACKING -> CONFIRMED -> ENDED
 """
 from collections import deque
 from datetime import datetime, timezone
@@ -15,10 +17,17 @@ import math
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from app.core.logging import logger
+from .hierarchy import (
+    ClassificationStatus,
+    EventLifecycle,
+    HierarchicalClassificationResult,
+    VisionTaxonomy,
+)
+from .temporal_fusion import TemporalTrackFusionEngine
 
 
 def _safe_float(val: Any, default: float = 0.0) -> float:
-    """Safely convert any numeric/string value to float with a fallback default."""
+    """Safely convert numeric/string value to float with fallback."""
     if val is None:
         return default
     try:
@@ -30,21 +39,10 @@ def _safe_float(val: Any, default: float = 0.0) -> float:
 def _normalize_bbox(box: Any) -> Dict[str, float]:
     """Normalize various bounding box representations into standard {'x1', 'y1', 'x2', 'y2'} dict."""
     if isinstance(box, dict):
-        raw_x1 = box.get("x1")
-        if raw_x1 is None:
-            raw_x1 = box.get("xmin", box.get("left", 0.0))
-
-        raw_y1 = box.get("y1")
-        if raw_y1 is None:
-            raw_y1 = box.get("ymin", box.get("top", 0.0))
-
-        raw_x2 = box.get("x2")
-        if raw_x2 is None:
-            raw_x2 = box.get("xmax", box.get("right", 0.0))
-
-        raw_y2 = box.get("y2")
-        if raw_y2 is None:
-            raw_y2 = box.get("ymax", box.get("bottom", 0.0))
+        raw_x1 = box.get("x1", box.get("xmin", box.get("left", 0.0)))
+        raw_y1 = box.get("y1", box.get("ymin", box.get("top", 0.0)))
+        raw_x2 = box.get("x2", box.get("xmax", box.get("right", 0.0)))
+        raw_y2 = box.get("y2", box.get("ymax", box.get("bottom", 0.0)))
 
         return {
             "x1": _safe_float(raw_x1, 0.0),
@@ -80,13 +78,6 @@ def compute_iou(box1: Any, box2: Any) -> float:
     if union <= 0.0:
         return 0.0
     return intersection / union
-
-
-def format_display_label(obj_class: str, track_id: int, confidence: float) -> str:
-    """Format standard display label (e.g. 'Person #12 | 96%', 'Car #7 | 91%')."""
-    cleaned = (obj_class or "OBJECT").replace("_", " ").title()
-    pct = round(confidence * 100)
-    return f"{cleaned} #{track_id} | {pct}%"
 
 
 class Track:
@@ -132,8 +123,14 @@ class Track:
         self.movement_direction: str = "STATIONARY"
         self.dwell_time: float = 0.0
 
-        self.entry_logged: bool = False
-        self.exit_logged: bool = False
+        # Hierarchical attributes
+        self.classification_status: ClassificationStatus = ClassificationStatus.UNKNOWN
+        self.event_lifecycle: EventLifecycle = EventLifecycle.DETECTED
+        self.subtype: Optional[str] = None
+        self.make: Optional[str] = None
+        self.model: Optional[str] = None
+        self.display_label: str = ""
+        self.is_hard_negative: bool = False
 
     def update(
         self,
@@ -155,7 +152,6 @@ class Track:
         if pts_msec is not None:
             if self.first_pts_msec is None:
                 self.first_pts_msec = pts_msec
-            # Calculate dwell time directly from presentation timestamps
             dwell_ms = max(0.0, pts_msec - self.first_pts_msec)
             self.dwell_time = round(dwell_ms / 1000.0, 1)
         else:
@@ -171,7 +167,6 @@ class Track:
             dy = cy - prev["y"]
             dist_px = math.sqrt(dx * dx + dy * dy)
 
-            # Determine real ΔPTS interval in seconds
             prev_pts = prev.get("pts_msec")
             if pts_msec is not None and prev_pts is not None and pts_msec > prev_pts:
                 delta_pts_sec = max(0.01, (pts_msec - prev_pts) / 1000.0)
@@ -182,9 +177,7 @@ class Track:
                 self.movement_direction = "STATIONARY"
                 self.speed_kmph = 0.0
             else:
-                # Approximate scale conversion: speed based on real ΔPTS displacement
                 px_per_sec = dist_px / delta_pts_sec
-                # Realistic civilian/traffic speed range estimate (0 - 140 km/h)
                 self.speed_kmph = round(min(140.0, max(5.0, px_per_sec * 0.12)), 1)
                 if abs(dy) > abs(dx):
                     self.movement_direction = "SOUTHBOUND" if dy > 0 else "NORTHBOUND"
@@ -212,14 +205,20 @@ class Track:
             "dwell_time": self.dwell_time,
             "movement_direction": self.movement_direction,
             "speed_kmph": self.speed_kmph,
-            "display_label": format_display_label(self.object_class, self.track_id, self.confidence),
+            "classification_status": self.classification_status.value,
+            "event_lifecycle": self.event_lifecycle.value,
+            "subtype": self.subtype,
+            "make": self.make,
+            "model": self.model,
+            "display_label": self.display_label,
+            "is_hard_negative": self.is_hard_negative,
         }
 
 
 class YOLO26Tracker:
     """
-    Multi-Object Tracker supporting IoU association, hardware PTS timing,
-    variable frame interval tolerance, and scene loop / discontinuity handling.
+    Multi-Object Tracker with Temporal Fusion, Hardware PTS timing,
+    and label hysteresis.
     """
 
     def __init__(
@@ -239,14 +238,11 @@ class YOLO26Tracker:
         self._next_track_id: int = 1
         self.tracks: Dict[int, Track] = {}
         self.frame_count: int = 0
+        self.fusion_engine: TemporalTrackFusionEngine = TemporalTrackFusionEngine(camera_id=camera_id)
 
         # Discontinuity & PTS tracking
         self.last_pts_msec: Optional[float] = None
         self.discontinuity_count: int = 0
-
-        self.total_entered: int = 0
-        self.total_exited: int = 0
-        self.class_breakdown: Dict[str, Dict[str, int]] = {}
 
     def reset(self) -> None:
         """Reset tracker state and clear all active tracks and counters."""
@@ -254,17 +250,10 @@ class YOLO26Tracker:
         self.tracks.clear()
         self.frame_count = 0
         self.last_pts_msec = None
-        self.total_entered = 0
-        self.total_exited = 0
-        self.class_breakdown.clear()
+        self.fusion_engine.reset()
 
     def check_and_handle_discontinuity(self, pts_msec: Optional[float]) -> bool:
-        """
-        Detects video loops or hard scene cuts:
-        1. Negative PTS step (pts_msec < last_pts_msec - 500ms): Feed loop rewind
-        2. Huge PTS jump (pts_msec > last_pts_msec + 10000ms): Discontinuity cut
-        Reconciles active tracks on cut so stale tracks do not persist.
-        """
+        """Detects video loops or hard scene cuts."""
         if pts_msec is None or self.last_pts_msec is None:
             return False
 
@@ -273,10 +262,10 @@ class YOLO26Tracker:
             self.discontinuity_count += 1
             logger.info(
                 f"[{self.camera_id}] Scene cut / feed loop detected (ΔPTS={delta:.1f}ms). "
-                f"Reconciling {len(self.tracks)} active tracks to prevent stale ID drift."
+                f"Reconciling {len(self.tracks)} active tracks."
             )
-            # Reconcile / reset active tracks at hard scene boundary
             self.tracks.clear()
+            self.fusion_engine.reset()
             return True
         return False
 
@@ -288,20 +277,15 @@ class YOLO26Tracker:
         pts_msec: Optional[float] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Associate detections with existing tracks and assign persistent track IDs.
-        Uses real hardware presentation timestamps (pts_msec).
+        Associate detections with existing tracks, assign persistent track IDs,
+        and apply multi-frame temporal classification fusion.
         """
         now_dt = timestamp or datetime.now(timezone.utc)
         self.frame_count += 1
 
-        # Check for scene loop / discontinuity
         self.check_and_handle_discontinuity(pts_msec)
         if pts_msec is not None:
             self.last_pts_msec = pts_msec
-
-        h, w = (frame_shape if frame_shape else (1080, 1920))[:2]
-        entry_y = h * self.entry_line_ratio
-        exit_y = h * self.exit_line_ratio
 
         active_track_ids = list(self.tracks.keys())
         matched_tracks: Set[int] = set()
@@ -309,10 +293,10 @@ class YOLO26Tracker:
 
         vehicle_classes = {
             "CAR", "TRUCK", "BUS", "MOTORCYCLE", "TWO_WHEELER",
-            "VEHICLE", "VAN", "AUTO_RICKSHAW", "BICYCLE"
+            "VEHICLE", "VAN", "AUTO_RICKSHAW", "BICYCLE", "OTHER_VEHICLE"
         }
 
-        # Candidate assignment matching
+        # Candidate assignment matching based on IoU
         candidates: List[Tuple[float, int, int]] = []
         for det_idx, det in enumerate(detections):
             bbox = det.get("bounding_box") or det.get("bbox") or {}
@@ -330,6 +314,7 @@ class YOLO26Tracker:
 
         candidates.sort(key=lambda x: x[0], reverse=True)
 
+        # 1. Update matched existing tracks
         for iou, det_idx, tid in candidates:
             if det_idx in matched_dets or tid in matched_tracks:
                 continue
@@ -345,17 +330,66 @@ class YOLO26Tracker:
             matched_tracks.add(tid)
             matched_dets.add(det_idx)
 
+            # Temporal classification fusion
+            raw_res = det.get("hierarchical_result")
+            if not isinstance(raw_res, HierarchicalClassificationResult):
+                raw_res = HierarchicalClassificationResult(
+                    category=obj_class,
+                    category_confidence=conf,
+                    subtype=det.get("attributes", {}).get("structure_type"),
+                    make=det.get("attributes", {}).get("make"),
+                    model=det.get("attributes", {}).get("model"),
+                    model_confidence=conf if det.get("attributes", {}).get("model") else None,
+                    classification_status=ClassificationStatus.CONFIDENT if conf >= 0.78 else ClassificationStatus.LIKELY,
+                    is_hard_negative=det.get("is_hard_negative", False),
+                    rejection_reason=det.get("rejection_reason"),
+                )
+
+            fused_res, lifecycle = self.fusion_engine.fuse_track_detection(tid, raw_res, timestamp=now_dt)
+
+            # Apply fused properties to track
+            track.object_class = fused_res.category
+            track.confidence = fused_res.category_confidence
+            track.subtype = fused_res.subtype
+            track.make = fused_res.make
+            track.model = fused_res.model
+            track.classification_status = fused_res.classification_status
+            track.event_lifecycle = lifecycle
+            track.display_label = fused_res.display_label or VisionTaxonomy.format_tactical_label(
+                category=fused_res.category,
+                subtype=fused_res.subtype,
+                make=fused_res.make,
+                model=fused_res.model,
+                confidence=fused_res.category_confidence,
+                status=fused_res.classification_status,
+                track_id=tid,
+            )
+            track.is_hard_negative = fused_res.is_hard_negative
+
+            # Populate detection payload
             det["track_id"] = tid
             det["camera_id"] = self.camera_id
+            det["object_class"] = fused_res.category
+            det["class_name"] = fused_res.category.lower()
+            det["confidence"] = fused_res.category_confidence
             det["first_seen"] = track.first_seen
             det["last_seen"] = track.last_seen
             det["dwell_time"] = track.dwell_time
             det["movement_direction"] = track.movement_direction
-            det["direction"] = track.movement_direction
             det["speed_kmph"] = track.speed_kmph
-            det["display_label"] = format_display_label(obj_class, tid, conf)
+            det["classification_status"] = fused_res.classification_status.value
+            det["event_lifecycle"] = lifecycle.value
+            det["display_label"] = track.display_label
+            det["is_hard_negative"] = fused_res.is_hard_negative
+            if "attributes" in det and isinstance(det["attributes"], dict):
+                if fused_res.make:
+                    det["attributes"]["make"] = fused_res.make
+                if fused_res.model:
+                    det["attributes"]["model"] = fused_res.model
+                    det["attributes"]["display_name"] = f"{fused_res.make or ''} {fused_res.model}".strip()
+                det["attributes"]["classification_status"] = fused_res.classification_status.value
 
-        # Register new tracks for unmatched detections
+        # 2. Register new tracks for unmatched detections
         for det_idx, det in enumerate(detections):
             if det_idx not in matched_dets:
                 bbox = det.get("bounding_box") or det.get("bbox") or {}
@@ -376,20 +410,66 @@ class YOLO26Tracker:
                 )
                 self.tracks[tid] = new_track
 
+                raw_res = det.get("hierarchical_result")
+                if not isinstance(raw_res, HierarchicalClassificationResult):
+                    raw_res = HierarchicalClassificationResult(
+                        category=obj_class,
+                        category_confidence=conf,
+                        subtype=det.get("attributes", {}).get("structure_type"),
+                        make=det.get("attributes", {}).get("make"),
+                        model=det.get("attributes", {}).get("model"),
+                        model_confidence=conf if det.get("attributes", {}).get("model") else None,
+                        classification_status=ClassificationStatus.CONFIDENT if conf >= 0.78 else ClassificationStatus.LIKELY,
+                        is_hard_negative=det.get("is_hard_negative", False),
+                        rejection_reason=det.get("rejection_reason"),
+                    )
+
+                fused_res, lifecycle = self.fusion_engine.fuse_track_detection(tid, raw_res, timestamp=now_dt)
+
+                new_track.object_class = fused_res.category
+                new_track.confidence = fused_res.category_confidence
+                new_track.subtype = fused_res.subtype
+                new_track.make = fused_res.make
+                new_track.model = fused_res.model
+                new_track.classification_status = fused_res.classification_status
+                new_track.event_lifecycle = lifecycle
+                new_track.display_label = fused_res.display_label or VisionTaxonomy.format_tactical_label(
+                    category=fused_res.category,
+                    subtype=fused_res.subtype,
+                    make=fused_res.make,
+                    model=fused_res.model,
+                    confidence=fused_res.category_confidence,
+                    status=fused_res.classification_status,
+                    track_id=tid,
+                )
+                new_track.is_hard_negative = fused_res.is_hard_negative
+
                 det["track_id"] = tid
                 det["camera_id"] = self.camera_id
+                det["object_class"] = fused_res.category
+                det["class_name"] = fused_res.category.lower()
+                det["confidence"] = fused_res.category_confidence
                 det["first_seen"] = new_track.first_seen
                 det["last_seen"] = new_track.last_seen
                 det["dwell_time"] = 0.0
                 det["movement_direction"] = "STATIONARY"
-                det["direction"] = "STATIONARY"
                 det["speed_kmph"] = 0.0
-                det["display_label"] = format_display_label(obj_class, tid, conf)
+                det["classification_status"] = fused_res.classification_status.value
+                det["event_lifecycle"] = lifecycle.value
+                det["display_label"] = new_track.display_label
+                det["is_hard_negative"] = fused_res.is_hard_negative
+                if "attributes" in det and isinstance(det["attributes"], dict):
+                    if fused_res.make:
+                        det["attributes"]["make"] = fused_res.make
+                    if fused_res.model:
+                        det["attributes"]["model"] = fused_res.model
+                        det["attributes"]["display_name"] = f"{fused_res.make or ''} {fused_res.model}".strip()
+                    det["attributes"]["classification_status"] = fused_res.classification_status.value
 
-        # Age unmatched tracks and prune dead ones
+        # 3. Age unmatched tracks and prune dead ones
         dead_tracks: List[int] = []
         for tid, track in self.tracks.items():
-            if tid not in matched_tracks:
+            if tid not in matched_tracks and tid not in [d.get("track_id") for d in detections]:
                 track.frames_since_update += 1
                 if track.frames_since_update > self.max_lost_frames:
                     dead_tracks.append(tid)
@@ -397,4 +477,5 @@ class YOLO26Tracker:
         for tid in dead_tracks:
             del self.tracks[tid]
 
+        self.fusion_engine.cleanup_lost_tracks(set(self.tracks.keys()))
         return detections

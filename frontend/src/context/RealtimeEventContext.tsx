@@ -187,7 +187,9 @@ export const RealtimeEventProvider: React.FC<{ children: React.ReactNode }> = ({
 
     // Build ws URL from API_BASE_URL
     const wsBase = API_BASE_URL.replace(/^http/, 'ws');
-    const wsUrl = `${wsBase}/events/ws`;
+    const token = localStorage.getItem('phantom_auth_token');
+    const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
+    const wsUrl = `${wsBase}/events/ws${tokenParam}`;
 
     try {
       const ws = new WebSocket(wsUrl);

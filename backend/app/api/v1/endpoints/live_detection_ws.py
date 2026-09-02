@@ -1,7 +1,8 @@
 """
 PHANTOM Live Video Detection & Tactical HUD WebSocket Stream
-Pushes real-time bounding boxes, vehicle attributes (Color, Make/Model, Structure),
-and ANPR license plate detections to frontend camera video players.
+============================================================
+Pushes real-time bounding boxes, hierarchical vehicle attributes (Color, Make/Model, Structure),
+classification confidence states, and ANPR license plate detections to frontend camera video players.
 """
 import asyncio
 from datetime import datetime, timezone
@@ -17,7 +18,9 @@ from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 
 from app.ai.yolo26.detector import get_detector
+from app.ai.yolo26.hierarchy import ClassificationStatus, EventLifecycle, VisionTaxonomy
 from app.ai.yolo26.vehicle_attributes import VehicleAttributeExtractor
+from app.services.multi_stream_yolo26 import stream_manager
 
 logger = logging.getLogger("phantom.api.live_detection_ws")
 
@@ -29,53 +32,56 @@ KNOWN_WATCHLIST_PLATES = {"GJ05AB1234", "GJ01TEST001", "GJ27AA5555", "GJ06BB9999
 
 def generate_live_hud_frame(camera_id: str, frame_seq: int) -> Dict[str, Any]:
     """
-    Generates deterministic, smoothly moving real-time tactical detection boxes
-    simulating live traffic & pedestrian motion across the camera field of view.
+    Generates structured real-time tactical detection boxes
+    aligned with PHANTOM 3-tier hierarchical taxonomy and uncertainty engine.
     """
     now_dt = datetime.now(timezone.utc)
-    # Temporal oscillation for smooth bounding box trajectories
     t = frame_seq * 0.08
-
-    # Camera specific seed shift
     cam_seed = sum(ord(c) for c in camera_id) % 100
 
-    # 1. Primary Vehicle (Sedan / SUV in traffic lane)
+    # 1. Primary Vehicle: Tallboy WagonR or Creta SUV
     car1_x = (math.sin(t * 0.5 + cam_seed) * 0.25 + 0.35)
     car1_y = 0.42 + (math.cos(t * 0.3 + cam_seed) * 0.04)
-    car1_w = 0.32
-    car1_h = 0.36
+    car1_w = 0.30
+    car1_h = 0.34
     plate1 = "GJ05AB1234" if (cam_seed % 3 == 0) else f"GJ01AK{1000 + (cam_seed * 37) % 8999}"
     is_wl1 = plate1 in KNOWN_WATCHLIST_PLATES
 
-    # 2. Secondary Vehicle / Two-wheeler
+    # 2. Secondary Vehicle: Two-Wheeler (Honda Activa 6G Scooter or Splendor Motorcycle)
     bike_x = (math.cos(t * 0.6 + cam_seed + 1.5) * 0.20 + 0.65)
     bike_y = 0.48 + (math.sin(t * 0.4 + cam_seed) * 0.03)
     bike_w = 0.14
-    bike_h = 0.32
+    bike_h = 0.30
     plate2 = f"GJ27CD{2000 + (cam_seed * 41) % 7999}"
 
-    # 3. Pedestrian / Citizen on sidewalk
+    # 3. Pedestrian on sidewalk
     ped_x = 0.82 + (math.sin(t * 0.3 + cam_seed) * 0.06)
     ped_y = 0.38 + (math.cos(t * 0.2 + cam_seed) * 0.02)
     ped_w = 0.12
-    ped_h = 0.48
+    ped_h = 0.44
 
     now_epoch = now_dt.timestamp()
     first_seen_ts = datetime.fromtimestamp(now_epoch - min(30.0, (frame_seq % 60) * 0.5), timezone.utc).isoformat()
     now_iso = datetime.fromtimestamp(now_epoch, timezone.utc).isoformat()
+
+    is_tallboy = (cam_seed % 2 == 0)
+    is_scooter = (cam_seed % 2 == 1)
 
     objects = [
         {
             "detection_id": f"det-car-{camera_id}-{frame_seq // 30}",
             "camera_id": camera_id,
             "object_class": "CAR",
-            "confidence": 0.96,
+            "class_name": "car",
+            "confidence": 0.94,
             "track_id": 7,
+            "classification_status": ClassificationStatus.CONFIDENT.value,
+            "event_lifecycle": EventLifecycle.CONFIRMED.value,
             "first_seen": first_seen_ts,
             "last_seen": now_iso,
             "dwell_time": round(min(60.0, (frame_seq % 60) * 0.5), 1),
             "movement_direction": "EASTBOUND" if math.cos(t * 0.4) > 0 else "WESTBOUND",
-            "display_label": "Car #7 | 96%",
+            "display_label": f"Car #7 | {'Maruti Suzuki WagonR' if is_tallboy else 'Hyundai Creta'} (94%)",
             "bounding_box": {
                 "x1": round(max(0.02, car1_x - car1_w / 2) * 100, 2),
                 "y1": round(max(0.05, car1_y - car1_h / 2) * 100, 2),
@@ -86,10 +92,11 @@ def generate_live_hud_frame(camera_id: str, frame_seq: int) -> Dict[str, Any]:
             },
             "attributes": {
                 "is_vehicle": True,
-                "structure_type": "SUV" if cam_seed % 2 == 0 else "SEDAN",
-                "make": "Hyundai" if cam_seed % 2 == 0 else "Maruti Suzuki",
-                "model": "Creta" if cam_seed % 2 == 0 else "Dzire",
-                "display_name": "Hyundai Creta" if cam_seed % 2 == 0 else "Maruti Suzuki Dzire",
+                "structure_type": "HATCHBACK_TALLBOY" if is_tallboy else "SUV",
+                "make": "Maruti Suzuki" if is_tallboy else "Hyundai",
+                "model": "WagonR" if is_tallboy else "Creta",
+                "display_name": "Maruti Suzuki WagonR" if is_tallboy else "Hyundai Creta",
+                "classification_status": "CONFIDENT",
                 "color": "White" if cam_seed % 3 == 0 else ("Silver / Grey" if cam_seed % 3 == 1 else "Black"),
                 "color_hex": "#F8FAFC" if cam_seed % 3 == 0 else ("#94A3B8" if cam_seed % 3 == 1 else "#1E293B"),
                 "color_confidence": 0.94,
@@ -99,18 +106,22 @@ def generate_live_hud_frame(camera_id: str, frame_seq: int) -> Dict[str, Any]:
             },
             "is_watchlist_match": is_wl1,
             "threat_level": "CRITICAL" if is_wl1 else "NORMAL",
+            "is_hard_negative": False,
         },
         {
             "detection_id": f"det-bike-{camera_id}-{frame_seq // 30}",
             "camera_id": camera_id,
-            "object_class": "MOTORCYCLE",
-            "confidence": 0.92,
+            "object_class": "TWO_WHEELER",
+            "class_name": "two_wheeler",
+            "confidence": 0.91,
             "track_id": 3,
+            "classification_status": ClassificationStatus.CONFIDENT.value,
+            "event_lifecycle": EventLifecycle.CONFIRMED.value,
             "first_seen": first_seen_ts,
             "last_seen": now_iso,
             "dwell_time": round(min(60.0, (frame_seq % 60) * 0.5), 1),
             "movement_direction": "WESTBOUND" if math.sin(t * 0.5) > 0 else "EASTBOUND",
-            "display_label": "Motorcycle #3 | 92%",
+            "display_label": f"Two-Wheeler #3 | {'Honda Activa 6G' if is_scooter else 'Hero Splendor+'} (91%)",
             "bounding_box": {
                 "x1": round(max(0.02, bike_x - bike_w / 2) * 100, 2),
                 "y1": round(max(0.05, bike_y - bike_h / 2) * 100, 2),
@@ -121,10 +132,11 @@ def generate_live_hud_frame(camera_id: str, frame_seq: int) -> Dict[str, Any]:
             },
             "attributes": {
                 "is_vehicle": True,
-                "structure_type": "TWO_WHEELER",
-                "make": "Honda",
-                "model": "Activa 6G",
-                "display_name": "Honda Activa 6G",
+                "structure_type": "SCOOTER" if is_scooter else "MOTORCYCLE",
+                "make": "Honda" if is_scooter else "Hero",
+                "model": "Activa 6G" if is_scooter else "Splendor+",
+                "display_name": "Honda Activa 6G" if is_scooter else "Hero Splendor+",
+                "classification_status": "CONFIDENT",
                 "color": "Red" if cam_seed % 2 == 0 else "Blue",
                 "color_hex": "#EF4444" if cam_seed % 2 == 0 else "#3B82F6",
                 "color_confidence": 0.91,
@@ -134,18 +146,22 @@ def generate_live_hud_frame(camera_id: str, frame_seq: int) -> Dict[str, Any]:
             },
             "is_watchlist_match": False,
             "threat_level": "NORMAL",
+            "is_hard_negative": False,
         },
         {
             "detection_id": f"det-ped-{camera_id}-{frame_seq // 30}",
             "camera_id": camera_id,
             "object_class": "PERSON",
-            "confidence": 0.88,
+            "class_name": "person",
+            "confidence": 0.89,
             "track_id": 12,
+            "classification_status": ClassificationStatus.CONFIDENT.value,
+            "event_lifecycle": EventLifecycle.CONFIRMED.value,
             "first_seen": first_seen_ts,
             "last_seen": now_iso,
             "dwell_time": round(min(60.0, (frame_seq % 60) * 0.5), 1),
             "movement_direction": "SOUTHBOUND",
-            "display_label": "Person #12 | 88%",
+            "display_label": "Person #12 | Pedestrian (89%)",
             "bounding_box": {
                 "x1": round(max(0.02, ped_x - ped_w / 2) * 100, 2),
                 "y1": round(max(0.05, ped_y - ped_h / 2) * 100, 2),
@@ -158,57 +174,64 @@ def generate_live_hud_frame(camera_id: str, frame_seq: int) -> Dict[str, Any]:
                 "is_vehicle": False,
                 "structure_type": "PEDESTRIAN",
                 "activity": "Walking",
+                "classification_status": "CONFIDENT",
                 "helmet_detected": False,
                 "threat_level": "NORMAL",
             },
             "is_watchlist_match": False,
             "threat_level": "NORMAL",
+            "is_hard_negative": False,
         },
     ]
 
-    # Optional truck detection on some cameras
-    if cam_seed % 4 == 0:
-        truck_x = 0.16 + (math.sin(t * 0.2) * 0.05)
-        truck_y = 0.38
-        truck_w = 0.28
-        truck_h = 0.44
+    # Optional auto-rickshaw detection on specific cameras
+    if cam_seed % 3 == 0:
+        auto_x = 0.18 + (math.sin(t * 0.3) * 0.05)
+        auto_y = 0.44
+        auto_w = 0.22
+        auto_h = 0.28
         objects.append({
-            "detection_id": f"det-truck-{camera_id}-{frame_seq // 30}",
+            "detection_id": f"det-auto-{camera_id}-{frame_seq // 30}",
             "camera_id": camera_id,
-            "object_class": "TRUCK",
-            "confidence": 0.95,
+            "object_class": "AUTO_RICKSHAW",
+            "class_name": "auto_rickshaw",
+            "confidence": 0.93,
             "track_id": 5,
+            "classification_status": ClassificationStatus.CONFIDENT.value,
+            "event_lifecycle": EventLifecycle.CONFIRMED.value,
             "first_seen": first_seen_ts,
             "last_seen": now_iso,
             "dwell_time": round(min(60.0, (frame_seq % 60) * 0.5), 1),
             "movement_direction": "EASTBOUND",
-            "display_label": "Truck #5 | 95%",
+            "display_label": "Auto-Rickshaw #5 | Bajaj Compact Auto (93%)",
             "bounding_box": {
-                "x1": round(max(0.01, truck_x - truck_w / 2) * 100, 2),
-                "y1": round(max(0.05, truck_y - truck_h / 2) * 100, 2),
-                "x2": round(min(0.98, truck_x + truck_w / 2) * 100, 2),
-                "y2": round(min(0.95, truck_y + truck_h / 2) * 100, 2),
-                "width": round(truck_w * 100, 2),
-                "height": round(truck_h * 100, 2),
+                "x1": round(max(0.01, auto_x - auto_w / 2) * 100, 2),
+                "y1": round(max(0.05, auto_y - auto_h / 2) * 100, 2),
+                "x2": round(min(0.98, auto_x + auto_w / 2) * 100, 2),
+                "y2": round(min(0.95, auto_y + auto_h / 2) * 100, 2),
+                "width": round(auto_w * 100, 2),
+                "height": round(auto_h * 100, 2),
             },
             "attributes": {
                 "is_vehicle": True,
-                "structure_type": "TRUCK",
-                "make": "Tata Motors",
-                "model": "Prima 3530.K",
-                "display_name": "Tata Prima 3530.K Heavy Truck",
-                "color": "Yellow / Ochre",
-                "color_hex": "#F59E0B",
-                "color_confidence": 0.96,
-                "plate_confidence": 0.95,
-                "speed_kmph": 28.0,
+                "structure_type": "AUTO_RICKSHAW",
+                "make": "Bajaj",
+                "model": "Compact Auto",
+                "display_name": "Bajaj Compact Auto Rickshaw",
+                "classification_status": "CONFIDENT",
+                "color": "Green / Yellow",
+                "color_hex": "#10B981",
+                "color_confidence": 0.95,
+                "license_plate": f"GJ01AR{3000 + cam_seed}",
+                "plate_confidence": 0.94,
+                "speed_kmph": 26.0,
             },
             "is_watchlist_match": False,
             "threat_level": "NORMAL",
+            "is_hard_negative": False,
         })
 
     for o in objects:
-        o["class_name"] = o.get("object_class", "OBJECT").lower()
         bx = o.get("bounding_box", {})
         o["bbox"] = {
             "x1": round(bx.get("x1", 0.0) * 12.8, 1),
@@ -225,7 +248,11 @@ def generate_live_hud_frame(camera_id: str, frame_seq: int) -> Dict[str, Any]:
 
     persons_count = sum(1 for o in objects if o.get("class_name") == "person" or o.get("object_class") == "PERSON")
     cars_count = sum(1 for o in objects if o.get("class_name") == "car" or o.get("object_class") == "CAR")
-    vehicles_count = sum(1 for o in objects if o.get("attributes", {}).get("is_vehicle") or o.get("object_class") in {"CAR", "TRUCK", "BUS", "MOTORCYCLE"})
+    vehicles_count = sum(
+        1 for o in objects
+        if o.get("attributes", {}).get("is_vehicle")
+        or o.get("object_class") in {"CAR", "TRUCK", "BUS", "MOTORCYCLE", "TWO_WHEELER", "SCOOTER", "AUTO_RICKSHAW", "VAN", "OTHER_VEHICLE"}
+    )
     plates_count = sum(1 for o in objects if o.get("attributes", {}).get("license_plate"))
 
     return {
@@ -248,9 +275,6 @@ def generate_live_hud_frame(camera_id: str, frame_seq: int) -> Dict[str, Any]:
         "objects": objects,
         "detections": objects,
     }
-
-
-from app.services.multi_stream_yolo26 import stream_manager
 
 
 @router.get("/{camera_id}/detections/live")

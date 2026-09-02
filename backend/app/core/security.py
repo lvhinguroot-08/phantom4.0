@@ -90,3 +90,94 @@ def decode_token(token: str) -> Dict[str, Any]:
         raise ValueError("Token has expired")
     except jwt.InvalidTokenError:
         raise ValueError("Invalid token")
+
+
+# =========================================================================
+# File Upload Hardening: Magic Bytes & Anti-Malware Validation
+# =========================================================================
+
+DANGEROUS_EXTENSIONS = {
+    ".exe", ".sh", ".php", ".py", ".bat", ".js", ".vbs", ".cmd",
+    ".dll", ".scr", ".jsp", ".asp", ".aspx", ".cgi", ".pl", ".bin",
+}
+
+VALID_MAGIC_SIGNATURES = [
+    b"ftyp",                      # MP4 / ISO Media
+    b"RIFF",                      # AVI / WAV
+    b"\x1a\x45\xdf\xa3",          # WebM / Matroska MKV
+    b"\xff\xd8\xff",              # JPEG
+    b"\x89PNG\r\n\x1a\n",          # PNG
+    b"GIF8",                      # GIF
+    b"\x00\x00\x00",              # MP4 Box Header prefix
+]
+
+
+def validate_media_file_magic_bytes(header_bytes: bytes, filename: str) -> bool:
+    """
+    Validates binary header magic bytes of uploaded media files.
+    Blocks files disguised as video or image containing executable scripts.
+    """
+    if not filename or not header_bytes:
+        return False
+
+    # Check extension
+    dot_idx = filename.rfind(".")
+    if dot_idx != -1:
+        ext = filename[dot_idx:].lower()
+        if ext in DANGEROUS_EXTENSIONS:
+            return False
+
+    # Check magic header bytes
+    prefix_32 = header_bytes[:32]
+
+    # MP4 inspection: usually contains 'ftyp' within first 16 bytes
+    if b"ftyp" in prefix_32:
+        return True
+
+    # RIFF AVI inspection: starts with 'RIFF' and has 'AVI ' at byte 8
+    if prefix_32.startswith(b"RIFF") and b"AVI" in prefix_32:
+        return True
+
+    # MKV / WebM
+    if prefix_32.startswith(b"\x1a\x45\xdf\xa3"):
+        return True
+
+    # JPEG / PNG images
+    if prefix_32.startswith(b"\xff\xd8\xff") or prefix_32.startswith(b"\x89PNG\r\n\x1a\n"):
+        return True
+
+    # Safe fallback for generic MP4 streams (e.g. 00 00 00 ... ftyp)
+    for sig in VALID_MAGIC_SIGNATURES:
+        if sig in prefix_32:
+            return True
+
+    return False
+
+
+# =========================================================================
+# Zero-Trust CCTV Stream Token Signing (HMAC-SHA256)
+# =========================================================================
+
+def create_stream_access_token(camera_id: str, officer_id: str = "sentinel_operator", valid_seconds: int = 300) -> str:
+    """
+    Generates a cryptographically signed HMAC token for authorized CCTV streaming.
+    Prevents unauthorized scraping or replay of sensitive police feeds.
+    """
+    payload = {
+        "cam": camera_id.lower().strip(),
+        "sub": officer_id,
+        "exp": datetime.now(timezone.utc) + timedelta(seconds=valid_seconds),
+        "type": "stream_auth",
+    }
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm="HS256")
+
+
+def verify_stream_access_token(token: str, camera_id: str) -> bool:
+    """Validates if the provided stream token is authentic, unexpired, and matches camera ID."""
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+        if payload.get("type") != "stream_auth":
+            return False
+        return payload.get("cam") == camera_id.lower().strip()
+    except Exception:
+        return False

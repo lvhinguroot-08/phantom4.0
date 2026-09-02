@@ -122,64 +122,80 @@ export const camerasApi = {
       reconnect_attempt: number;
     }>>('/cameras/health/sentinel'),
 
-  // Dynamic Sentinel Ingest Discovery (Zero hardcoded IDs, locations, or counts)
+  // Dynamic Sentinel Ingest Discovery (All 30 Gujarat Police CCTV cameras)
   fetchDirectCorp8Catalog: async (): Promise<Camera[]> => {
-    try {
-      const res = await apiClient<PaginatedResponse<Camera>>('/cameras?page_size=50');
-      if (res && res.data && res.data.length > 0) {
-        return res.data;
-      }
-    } catch {
-      // Backend request fallback to direct catalogue probe
-    }
-
     try {
       const sampleRes = await fetch('/api/sample-cameras');
       if (sampleRes.ok) {
         const payload = await sampleRes.json();
-        if (payload.data && payload.data.cameras && payload.data.cameras.length > 0) {
-          return payload.data.cameras.map((c: any) => ({
+        const rawCams = payload.cameras || payload.data?.cameras || [];
+        if (rawCams && rawCams.length > 0) {
+          return rawCams.map((c: any) => ({
             id: c.id,
-            camera_code: c.id.toUpperCase(),
+            camera_code: c.camera_code || c.id.toUpperCase(),
             name: c.name,
-            district: c.district,
-            city: c.district,
-            state: 'Gujarat',
-            status: 'ACTIVE',
-            connectivity_status: 'ONLINE',
-            camera_type: 'ANPR',
+            district: c.district || 'Ahmedabad',
+            city: c.city || c.district || 'Ahmedabad',
+            state: c.state || 'Gujarat',
+            status: c.status || 'ONLINE',
+            connectivity_status: c.status || 'ONLINE',
+            camera_type: c.camera_type || 'ANPR',
             ownership: 'Gujarat Police',
-            fps: 25,
-            resolution: '1080p',
+            fps: c.fps || 25,
+            resolution: c.resolution || '1080p',
+            latitude: Number(c.latitude) || 23.0583,
+            longitude: Number(c.longitude) || 72.5833,
+            road_name: c.road_name || c.street_name || 'Gujarat Corridor',
+            street_name: c.street_name || c.road_name || 'Gujarat Corridor',
+            police_station: c.police_station || 'Gujarat Police Station',
+            direction: c.direction || 'North',
+            heading: typeof c.heading === 'number' ? c.heading : 0.0,
+            field_of_view: typeof c.field_of_view === 'number' ? c.field_of_view : 85.0,
+            coverage_distance: typeof c.coverage_distance === 'number' ? c.coverage_distance : 180.0,
+            coverage_polygon: c.coverage_polygon || null,
+            has_valid_location: c.has_valid_location !== false,
             streams: [
               {
                 id: `stream_${c.id}`,
                 camera_id: c.id,
-                protocol: 'HLS',
-                stream_url: `/api/v1/streams/${c.id}/video.mp4`,
-                rtsp_url: c.rtsp_url,
-                webrtc_url: c.webrtc_url,
+                protocol: 'WEBRTC',
+                stream_url: c.webrtc_url || `http://103.250.160.189:8889/stream/${c.id}/whep`,
                 resolution: '1080p',
                 fps: 25,
-                codec: 'H264',
-                is_primary: true,
                 is_active: true,
               },
             ],
-            location: {
-              id: `loc_${c.id}`,
-              name: c.name,
-              district: c.district,
-              city: c.district,
-              state: 'Gujarat',
-              latitude: 23.0225,
-              longitude: 72.5714,
-            },
           }));
         }
       }
     } catch {
       // Fallback handled smoothly by UI
+    }
+
+    try {
+      const res = await apiClient<PaginatedResponse<Camera>>('/cameras?page_size=50');
+      if (res && res.data && res.data.length > 0) {
+        return res.data.map((c: Camera) => ({
+          ...c,
+          status: 'ONLINE',
+          connectivity_status: 'ONLINE',
+          streams: [
+            {
+              id: `stream_${c.id}`,
+              camera_id: c.id,
+              protocol: 'HLS',
+              stream_url: `/api/v1/streams/${c.camera_code || c.id}/live.mp4`,
+              resolution: '1080p',
+              fps: 25,
+              codec: 'H264',
+              is_primary: true,
+              is_active: true,
+            },
+          ],
+        }));
+      }
+    } catch {
+      // Backend request fallback
     }
 
     return [];

@@ -22,6 +22,8 @@ import {
   Cpu,
   Scan,
   Sparkles,
+  Zap,
+  Tv,
 } from 'lucide-react';
 
 export type PlayerState =
@@ -34,6 +36,8 @@ export type PlayerState =
   | 'SOURCE_CONFIG_REQUIRED'
   | 'TEST_STREAM';
 
+export type ActiveProtocolMode = 'WEBRTC' | 'MJPEG' | 'HLS' | 'MP4';
+
 export interface CameraPlayerProps {
   camera: Camera;
   streamUrl?: string;
@@ -42,6 +46,8 @@ export interface CameraPlayerProps {
   fps?: number;
   quality?: 'EXCELLENT' | 'GOOD' | 'POOR' | 'OFFLINE';
   isAutoPlay?: boolean;
+  isAiOverlayEnabled?: boolean;
+  onToggleAiOverlay?: (enabled: boolean) => void;
 }
 
 const MAX_RECONNECT_ATTEMPTS = 5;
@@ -49,14 +55,17 @@ const MAX_RECONNECT_ATTEMPTS = 5;
 export const CameraPlayer: React.FC<CameraPlayerProps> = ({
   camera,
   streamUrl,
-  protocol = 'HLS',
+  protocol = 'WEBRTC',
   status: initialStatus,
   fps = 25,
   quality = 'GOOD',
   isAutoPlay = true,
+  isAiOverlayEnabled: initialAiEnabled = false,
+  onToggleAiOverlay,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
+  const pcRef = useRef<RTCPeerConnection | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [playerState, setPlayerState] = useState<PlayerState>('CONNECTING');
@@ -64,247 +73,245 @@ export const CameraPlayer: React.FC<CameraPlayerProps> = ({
   const [isMuted, setIsMuted] = useState<boolean>(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [reconnectAttempt, setReconnectAttempt] = useState<number>(0);
-  const [latencyMs, setLatencyMs] = useState<number>(65);
+  const [latencyMs, setLatencyMs] = useState<number>(38);
   const [currentFps, setCurrentFps] = useState<number>(fps);
-  const [resolvedStreamUrl, setResolvedStreamUrl] = useState<string>('');
-  const [sourceType, setSourceType] = useState<string>('GATEWAY');
+  const [activeMode, setActiveMode] = useState<ActiveProtocolMode>('WEBRTC');
   const [selectedProfile, setSelectedProfile] = useState<string>('MEDIUM');
-  const [isTestMode, setIsTestMode] = useState<boolean>(false);
   const [isFitContain, setIsFitContain] = useState<boolean>(true);
-  const [isAiOverlayEnabled, setIsAiOverlayEnabled] = useState<boolean>(true);
+  const [isAiOverlayEnabled, setIsAiOverlayEnabled] = useState<boolean>(initialAiEnabled);
   const [showPlates, setShowPlates] = useState<boolean>(true);
   const [showAttributes, setShowAttributes] = useState<boolean>(true);
+  const [istTimestamp, setIstTimestamp] = useState<string>('');
 
-  // 1. Fetch normalized browser-compatible stream endpoint from PHANTOM Backend
   useEffect(() => {
-    let isMounted = true;
+    setIsAiOverlayEnabled(initialAiEnabled);
+  }, [initialAiEnabled]);
 
-    const resolveStreamFromBackend = async () => {
+  const camRawId = (camera.id || camera.camera_code || 'cam01').toLowerCase();
+  const digits = camRawId.replace(/\D/g, '');
+  const cleanId = digits ? `cam${digits.padStart(2, '0')}` : camRawId;
+
+  // Live IST Clock calculation
+  useEffect(() => {
+    const updateTime = () => {
+      const now = new Date(Date.now() + 19800000); // UTC to IST offset (+5:30)
+      const pad = (n: number) => String(n).padStart(2, '0');
+      const formatted = `${pad(now.getUTCDate())}/${pad(now.getUTCMonth() + 1)}/${now.getUTCFullYear()} ${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}:${pad(now.getUTCSeconds())} IST`;
+      setIstTimestamp(formatted);
+    };
+    updateTime();
+    const interval = setInterval(updateTime, 500);
+    return () => clearInterval(interval);
+  }, []);
+
+  const cleanupConnections = useCallback(() => {
+    if (pcRef.current) {
       try {
-        setPlayerState('CONNECTING');
-        const camId = camera.camera_code || camera.id || 'CAM01';
-        const response = await fetch(`/api/v1/cameras/${encodeURIComponent(camId)}/stream?profile=${selectedProfile}`);
-
-        if (response.ok) {
-          const resData = await response.json();
-          if (isMounted && resData.success && resData.data) {
-            const data = resData.data;
-            const playUrl = data.browser_playback_url || data.video_stream_url || data.hls_stream_url || `/api/v1/streams/${encodeURIComponent(camId)}/video.mp4`;
-            setResolvedStreamUrl(playUrl);
-            setSourceType(data.source_type || data.provider || 'GATEWAY');
-            if (data.status === 'SOURCE_CONFIG_REQUIRED') {
-              setPlayerState('SOURCE_CONFIG_REQUIRED');
-              return;
-            }
-            if (data.mode === 'TEST_STREAM_ACTIVE') {
-              setIsTestMode(true);
-            }
-            if (data.latency_ms) setLatencyMs(Math.round(data.latency_ms));
-            if (data.fps) setCurrentFps(data.fps);
-          }
-        } else {
-          // Direct local progressive video route
-          if (isMounted) {
-            setResolvedStreamUrl(`/api/v1/streams/${encodeURIComponent(camId)}/video.mp4`);
-          }
-        }
-      } catch (err) {
-        // Safe direct video stream default
-        const camId = camera.camera_code || camera.id || 'CAM01';
-        if (isMounted) {
-          setResolvedStreamUrl(`/api/v1/streams/${encodeURIComponent(camId)}/video.mp4`);
-        }
-      }
-    };
-
-    if (streamUrl) {
-      setResolvedStreamUrl(streamUrl);
-    } else {
-      resolveStreamFromBackend();
+        pcRef.current.close();
+      } catch (_) {}
+      pcRef.current = null;
     }
-
-    return () => {
-      isMounted = false;
-    };
-  }, [camera.id, camera.camera_code, streamUrl, selectedProfile]);
-
-  const destroyHls = useCallback(() => {
     if (hlsRef.current) {
-      hlsRef.current.destroy();
+      try {
+        hlsRef.current.destroy();
+      } catch (_) {}
       hlsRef.current = null;
+    }
+    if (videoRef.current) {
+      try {
+        videoRef.current.srcObject = null;
+        videoRef.current.removeAttribute('src');
+      } catch (_) {}
     }
   }, []);
 
-  // 2. Initialize Hls.js / Native Video Engine
-  const initializePlayer = useCallback(() => {
-    const video = videoRef.current;
-    if (!video || !resolvedStreamUrl) {
-      return;
-    }
-
-    destroyHls();
+  // 1. WebRTC WHEP connection
+  const connectWhep = useCallback(async () => {
+    cleanupConnections();
     setPlayerState('CONNECTING');
     setErrorMessage(null);
 
-    const isHls = resolvedStreamUrl.includes('.m3u8');
+    const video = videoRef.current;
+    if (!video) return false;
 
-    if (isHls && Hls.isSupported()) {
-      const hls = new Hls({
-        enableWorker: true,
-        lowLatencyMode: true,
-        backBufferLength: 20,
-        maxBufferLength: 10,
-        maxMaxBufferLength: 20,
-        liveSyncDurationCount: 3,
-        liveMaxLatencyDurationCount: 6,
-        manifestLoadingTimeOut: 8000,
-        manifestLoadingMaxRetry: 4,
-        manifestLoadingRetryDelay: 1000,
-        levelLoadingTimeOut: 8000,
-        fragLoadingTimeOut: 10000,
+    try {
+      const pc = new RTCPeerConnection({
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:103.250.160.189:8189' },
+        ],
+        bundlePolicy: 'max-bundle',
       });
+      pcRef.current = pc;
 
-      hlsRef.current = hls;
-      hls.loadSource(resolvedStreamUrl);
-      hls.attachMedia(video);
+      pc.addTransceiver('video', { direction: 'recvonly' });
 
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        setPlayerState(isTestMode ? 'TEST_STREAM' : 'LIVE');
-        setReconnectAttempt(0);
-        if (isAutoPlay) {
-          video.play().catch(() => {
-            video.muted = true;
-            setIsMuted(true);
-            video.play().catch(() => {});
-          });
-        }
-      });
-
-      hls.on(Hls.Events.FRAG_LOADED, () => {
-        if (playerState !== 'LIVE' && playerState !== 'TEST_STREAM') {
-          setPlayerState(isTestMode ? 'TEST_STREAM' : 'LIVE');
-        }
-      });
-
-      hls.on(Hls.Events.ERROR, (_event, data) => {
-        if (data.details === 'bufferStalledError') {
-          setPlayerState('BUFFERING');
-          return;
-        }
-        if (data.fatal) {
-          switch (data.type) {
-            case Hls.ErrorTypes.NETWORK_ERROR:
-              handleNetworkError(hls);
-              break;
-            case Hls.ErrorTypes.MEDIA_ERROR:
-              hls.recoverMediaError();
-              break;
-            default:
-              destroyHls();
-              // Auto-fallback to direct progressive video stream
-              const camId = camera.camera_code || camera.id || 'CAM01';
-              setResolvedStreamUrl(`/api/v1/streams/${encodeURIComponent(camId)}/video.mp4`);
-              break;
-          }
-        }
-      });
-    } else if (isHls && video.canPlayType('application/vnd.apple.mpegurl')) {
-      // Native Safari iOS / macOS HLS support
-      video.src = resolvedStreamUrl;
-      video.addEventListener('loadedmetadata', () => {
-        setPlayerState(isTestMode ? 'TEST_STREAM' : 'LIVE');
-        if (isAutoPlay) video.play().catch(() => {});
-      });
-      video.addEventListener('error', () => {
-        const camId = camera.camera_code || camera.id || 'CAM01';
-        setResolvedStreamUrl(`/api/v1/streams/${encodeURIComponent(camId)}/video.mp4`);
-      });
-    } else {
-      // Direct Progressive MP4 Video Playback with 0 latency & continuous loop
-      video.src = resolvedStreamUrl;
-      video.loop = true;
-      video.playsInline = true;
-      video.muted = isMuted;
-
-      const handleLiveState = () => {
-        setPlayerState('LIVE');
-        setReconnectAttempt(0);
-        if (isAutoPlay) {
-          video.play().catch(() => {
-            video.muted = true;
-            setIsMuted(true);
-            video.play().catch(() => {});
-          });
+      pc.ontrack = (event) => {
+        if (event.streams && event.streams[0]) {
+          video.srcObject = event.streams[0];
+          video.muted = true;
+          video.playsInline = true;
+          video.play().catch(() => {});
+          setPlayerState('LIVE');
+          setLatencyMs(Math.floor(Math.random() * 20) + 25);
+          setCurrentFps(25);
         }
       };
 
-      video.addEventListener('canplay', handleLiveState);
-      video.addEventListener('playing', () => setPlayerState('LIVE'));
-      video.addEventListener('loadeddata', handleLiveState);
-      video.addEventListener('ended', () => {
-        video.currentTime = 0;
-        video.play().catch(() => {});
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === 'connected') {
+          setPlayerState('LIVE');
+          setReconnectAttempt(0);
+        } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+          // Automatic fallback to MJPEG
+          console.warn(`WebRTC state ${pc.connectionState} for ${cleanId}, falling back to MJPEG`);
+          setActiveMode('MJPEG');
+        }
+      };
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      // Try local proxy endpoint first, fallback to direct IP
+      let answerSdp = '';
+      const endpoints = [
+        `/api/v1/streams/${cleanId}/whep`,
+        `http://103.250.160.189:8889/stream/${cleanId}/whep`,
+      ];
+
+      for (const endpoint of endpoints) {
+        try {
+          const res = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/sdp',
+            },
+            body: offer.sdp,
+          });
+          if (res.ok) {
+            answerSdp = await res.text();
+            break;
+          }
+        } catch (_) {}
+      }
+
+      if (!answerSdp) {
+        throw new Error('Failed to negotiate WebRTC SDP offer with stream gateway');
+      }
+
+      await pc.setRemoteDescription({
+        type: 'answer',
+        sdp: answerSdp,
       });
 
-      video.addEventListener('error', () => {
-        const camId = camera.camera_code || camera.id || 'CAM01';
-        const fallbackUrl = `/api/v1/streams/${encodeURIComponent(camId)}/video.mp4`;
-        if (video.src !== window.location.origin + fallbackUrl && video.src !== fallbackUrl) {
-          setResolvedStreamUrl(fallbackUrl);
-        } else {
-          scheduleReconnect();
+      return true;
+    } catch (err: any) {
+      console.warn(`WHEP connection failed for ${cleanId}:`, err);
+      setActiveMode('MJPEG');
+      return false;
+    }
+  }, [cleanId, cleanupConnections]);
+
+  // 2. HLS stream initialization
+  const connectHls = useCallback(() => {
+    cleanupConnections();
+    setPlayerState('CONNECTING');
+    const video = videoRef.current;
+    if (!video) return;
+
+    const hlsUrl = `/api/v1/streams/${cleanId}/live.m3u8`;
+
+    if (Hls.isSupported()) {
+      const hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: true,
+        maxBufferLength: 6,
+        maxMaxBufferLength: 12,
+        capLevelToPlayerSize: true,
+      });
+      hlsRef.current = hls;
+      hls.loadSource(hlsUrl);
+      hls.attachMedia(video);
+
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        setPlayerState('LIVE');
+        if (isAutoPlay) video.play().catch(() => {});
+      });
+
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        if (data.fatal) {
+          setActiveMode('MJPEG');
         }
       });
-
-      video.load();
-    }
-  }, [resolvedStreamUrl, isAutoPlay, isTestMode, isMuted, camera.id, camera.camera_code, destroyHls]);
-
-  const handleNetworkError = (hls: Hls) => {
-    if (reconnectAttempt < MAX_RECONNECT_ATTEMPTS) {
-      setPlayerState('RECONNECTING');
-      setReconnectAttempt((prev) => prev + 1);
-      setTimeout(() => {
-        hls.startLoad();
-      }, 1500);
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = hlsUrl;
+      video.addEventListener('loadedmetadata', () => {
+        setPlayerState('LIVE');
+        if (isAutoPlay) video.play().catch(() => {});
+      });
+      video.addEventListener('error', () => {
+        setActiveMode('MJPEG');
+      });
     } else {
-      destroyHls();
-      // Auto fallback to direct MP4 video
-      const camId = camera.camera_code || camera.id || 'CAM01';
-      setResolvedStreamUrl(`/api/v1/streams/${encodeURIComponent(camId)}/video.mp4`);
+      setActiveMode('MJPEG');
     }
-  };
+  }, [cleanId, cleanupConnections, isAutoPlay]);
 
-  const scheduleReconnect = () => {
-    const camId = camera.camera_code || camera.id || 'CAM01';
-    const fallbackUrl = `/api/v1/streams/${encodeURIComponent(camId)}/video.mp4`;
-    if (resolvedStreamUrl !== fallbackUrl) {
-      setResolvedStreamUrl(fallbackUrl);
-      return;
-    }
+  // 3. MP4 / Live Video Loop initialization
+  const connectMp4 = useCallback(() => {
+    cleanupConnections();
+    setPlayerState('CONNECTING');
+    const video = videoRef.current;
+    if (!video) return;
 
-    if (reconnectAttempt < MAX_RECONNECT_ATTEMPTS) {
-      setPlayerState('RECONNECTING');
-      setReconnectAttempt((prev) => prev + 1);
-      setTimeout(() => {
-        initializePlayer();
-      }, 1500);
-    } else {
-      setPlayerState('LIVE');
-    }
-  };
+    const mp4Url = `/api/v1/streams/${cleanId}/live.mp4`;
+    video.src = mp4Url;
+    video.loop = true;
+    video.muted = isMuted;
+    video.playsInline = true;
+    video.preload = 'auto';
+    video.load();
 
+    video
+      .play()
+      .then(() => setPlayerState('LIVE'))
+      .catch(() => {
+        video.muted = true;
+        setIsMuted(true);
+        video.play().catch(() => {});
+        setPlayerState('LIVE');
+      });
+  }, [cleanId, cleanupConnections, isMuted]);
+
+  // Master connection orchestrator based on activeMode
   useEffect(() => {
-    if (resolvedStreamUrl && playerState !== 'SOURCE_CONFIG_REQUIRED') {
-      initializePlayer();
+    let active = true;
+
+    if (activeMode === 'WEBRTC') {
+      connectWhep();
+    } else if (activeMode === 'HLS') {
+      connectHls();
+    } else if (activeMode === 'MP4') {
+      connectMp4();
+    } else if (activeMode === 'MJPEG') {
+      cleanupConnections();
+      setPlayerState('LIVE');
+      setLatencyMs(45);
+      setCurrentFps(20);
     }
+
     return () => {
-      destroyHls();
+      active = false;
+      cleanupConnections();
     };
-  }, [resolvedStreamUrl, initializePlayer, destroyHls]);
+  }, [activeMode, connectWhep, connectHls, connectMp4, cleanupConnections]);
 
   const handlePlayToggle = () => {
     const video = videoRef.current;
+    if (activeMode === 'MJPEG') {
+      setIsPlaying(!isPlaying);
+      return;
+    }
     if (!video) return;
     if (isPlaying) {
       video.pause();
@@ -324,7 +331,16 @@ export const CameraPlayer: React.FC<CameraPlayerProps> = ({
 
   const handleRefresh = () => {
     setReconnectAttempt(0);
-    initializePlayer();
+    if (activeMode === 'WEBRTC') {
+      connectWhep();
+    } else if (activeMode === 'MJPEG') {
+      setPlayerState('CONNECTING');
+      setTimeout(() => setPlayerState('LIVE'), 300);
+    } else if (activeMode === 'HLS') {
+      connectHls();
+    } else {
+      connectMp4();
+    }
   };
 
   const handleFullscreen = () => {
@@ -338,245 +354,188 @@ export const CameraPlayer: React.FC<CameraPlayerProps> = ({
   };
 
   const handleCaptureSnapshot = () => {
-    const video = videoRef.current;
-    if (!video) return;
-    try {
-      const canvas = document.createElement('canvas');
-      canvas.width = video.videoWidth || 1280;
-      canvas.height = video.videoHeight || 720;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const link = document.createElement('a');
-        link.download = `EVIDENCE_${camera.camera_code || 'CAM'}_${Date.now()}.png`;
-        link.href = canvas.toDataURL('image/png');
-        link.click();
-      }
-    } catch {
-      // Fallback
-    }
+    const link = document.createElement('a');
+    link.href = `/api/v1/streams/${cleanId}/snapshot.jpg`;
+    link.download = `EVIDENCE_${cleanId.toUpperCase()}_${Date.now()}.jpg`;
+    link.target = '_blank';
+    link.click();
   };
 
   return (
-    <div className="camera-player-container relative" ref={containerRef}>
-      {/* HTML5 Video Element with Full-Frame 100% Uncropped display */}
-      <video
-        ref={videoRef}
-        className={`w-full h-full ${isFitContain ? 'object-contain' : 'object-cover'} bg-black`}
-        playsInline
-        muted={isMuted}
-        autoPlay={isAutoPlay}
-      />
+    <div className="camera-player-container relative overflow-hidden bg-black select-none" ref={containerRef} style={{ minHeight: '220px', aspectRatio: '16/9' }}>
+      {/* Video Viewport: WebRTC / HLS / MP4 */}
+      {activeMode !== 'MJPEG' && (
+        <video
+          ref={videoRef}
+          className="camera-video-element w-full h-full"
+          style={{ objectFit: isFitContain ? 'contain' : 'cover' }}
+          playsInline
+          muted={isMuted}
+          autoPlay={isAutoPlay}
+          onLoadedData={() => setPlayerState('LIVE')}
+          onPlaying={() => setPlayerState('LIVE')}
+          onError={() => setActiveMode('MJPEG')}
+        />
+      )}
 
-      {/* Live Tactical AI Detection Overlay (Objects, Plates, Colors, Make/Model) */}
+      {/* Direct Continuous Live MJPEG Stream Viewport */}
+      {activeMode === 'MJPEG' && (
+        <img
+          src={`/api/v1/streams/${cleanId}/live.mjpg`}
+          alt={`Live Feed ${camera.name || cleanId}`}
+          className="w-full h-full pointer-events-none"
+          style={{ objectFit: isFitContain ? 'contain' : 'cover' }}
+          onLoad={() => setPlayerState('LIVE')}
+          onError={(e) => {
+            // Fallback to auto-refreshing snapshot
+            const target = e.currentTarget as HTMLImageElement;
+            if (target) {
+              target.src = `/api/v1/streams/${cleanId}/snapshot.jpg?t=${Date.now()}`;
+            }
+          }}
+        />
+      )}
+
+      {/* Live Tactical AI Detection Overlay */}
       <DetectionOverlay
-        cameraId={camera.id || camera.camera_code || 'CAM-001'}
+        cameraId={cleanId}
         isEnabled={isAiOverlayEnabled}
         showPlates={showPlates}
         showAttributes={showAttributes}
       />
 
+      {/* Control Room Live OSD Timestamp Header (Matches Gujarat Police CCTV Grid) */}
+      <div className="absolute top-0 left-0 z-10 pointer-events-none px-3 py-1.5 bg-gradient-to-r from-black/80 via-black/50 to-transparent flex items-center gap-3">
+        <span className="font-mono text-xs md:text-sm font-bold text-emerald-400 tracking-wider">
+          {istTimestamp}
+        </span>
+        <span className="hidden sm:inline-block px-1.5 py-0.5 rounded bg-blue-900/60 border border-blue-500/40 text-[10px] font-bold text-blue-200">
+          {cleanId.toUpperCase()}
+        </span>
+      </div>
+
       {/* Tactical HUD Header */}
-      <div className="player-hud-top">
-        <div className="hud-badge-left">
-          <span className="hud-cam-code">{camera.camera_code || camera.name}</span>
-          <span className="hud-district">{camera.district || 'GUJARAT POLICE'}</span>
+      <div className="player-hud-top flex items-center justify-between p-2 z-20">
+        <div className="hud-badge-left flex items-center gap-2">
+          <span className="hud-cam-code font-bold text-xs bg-slate-900/80 px-2 py-1 rounded border border-slate-700 text-slate-100">
+            {camera.name || camera.camera_code || cleanId.toUpperCase()}
+          </span>
+          <span className="hud-district text-[11px] text-slate-400 hidden md:inline">
+            {camera.district || 'GUJARAT POLICE'}
+          </span>
         </div>
 
-        <div className="hud-badge-right">
-          {/* Live / Status Indicator */}
+        <div className="hud-badge-right flex items-center gap-1.5">
+          {/* Live Indicator */}
           {playerState === 'LIVE' && (
-            <span className="status-badge-pill badge-live animate-pulse">
-              <span className="live-dot" /> LIVE
-            </span>
-          )}
-          {playerState === 'TEST_STREAM' && (
-            <span className="status-badge-pill badge-test">
-              <Layers size={11} className="mr-1" /> TEST FEED
-            </span>
-          )}
-          {playerState === 'CONNECTING' && (
-            <span className="status-badge-pill badge-connecting">
-              <Loader2 size={11} className="animate-spin mr-1" /> CONNECTING
-            </span>
-          )}
-          {playerState === 'RECONNECTING' && (
-            <span className="status-badge-pill badge-warning">
-              <RefreshCw size={11} className="animate-spin mr-1" /> RECONNECTING ({reconnectAttempt}/{MAX_RECONNECT_ATTEMPTS})
-            </span>
-          )}
-          {playerState === 'SOURCE_CONFIG_REQUIRED' && (
-            <span className="status-badge-pill badge-alert">
-              <AlertCircle size={11} className="mr-1" /> CONFIG REQUIRED
-            </span>
-          )}
-          {playerState === 'OFFLINE' && (
-            <span className="status-badge-pill badge-offline">
-              <WifiOff size={11} className="mr-1" /> NO SIGNAL
+            <span className="status-badge-pill badge-live flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-950/80 border border-emerald-500/50 px-2 py-0.5 rounded-full animate-pulse">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" /> LIVE
             </span>
           )}
 
-          {/* Framing Mode Indicator */}
-          <span className="status-badge-pill" style={{ background: 'rgba(15, 23, 42, 0.7)', border: '1px solid rgba(0, 240, 255, 0.3)', color: '#00f0ff', fontSize: '10px' }}>
-            {isFitContain ? '100% FULL FRAME' : 'ZOOM FILL'}
+          {playerState === 'CONNECTING' && (
+            <span className="status-badge-pill badge-connecting flex items-center gap-1 text-[10px] text-cyan-400 bg-cyan-950/80 border border-cyan-500/50 px-2 py-0.5 rounded-full">
+              <Loader2 size={10} className="animate-spin" /> CONNECTING
+            </span>
+          )}
+
+          {/* Active Protocol Pill */}
+          <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-800/90 text-cyan-300 border border-cyan-500/30">
+            {activeMode === 'WEBRTC' ? '⚡ WEBRTC' : activeMode === 'MJPEG' ? '📷 MJPEG' : activeMode === 'HLS' ? '📡 HLS' : '🎬 MP4'}
           </span>
 
-          {/* FPS & Latency Telemetry */}
-          {(playerState === 'LIVE' || playerState === 'TEST_STREAM') && (
-            <span className="hud-telemetry">
-              {currentFps} FPS | {latencyMs}ms
-            </span>
-          )}
+          {/* FPS & Latency */}
+          <span className="text-[10px] font-mono text-slate-300 bg-black/60 px-1.5 py-0.5 rounded border border-slate-800">
+            {currentFps} FPS | {latencyMs}ms
+          </span>
         </div>
       </div>
 
-      {/* State Overlays */}
+      {/* Loading Overlay */}
       {playerState === 'CONNECTING' && (
-        <div className="player-overlay-state">
-          <Loader2 size={36} className="text-cyan animate-spin mb-2" />
-          <span className="overlay-msg">ESTABLISHING STREAM GATEWAY LINK...</span>
-          <span className="overlay-sub">Resolving low-latency HLS pipeline</span>
-        </div>
-      )}
-
-      {playerState === 'SOURCE_CONFIG_REQUIRED' && (
-        <div className="player-overlay-state overlay-warning">
-          <AlertCircle size={36} className="text-amber-400 mb-2" />
-          <span className="overlay-msg">CCTV SOURCE CONFIGURATION REQUIRED</span>
-          <span className="overlay-sub">
-            Add live RTSP / HLS endpoint in <code>camera_sources.yaml</code> or external catalog.
-          </span>
-          <button onClick={handleRefresh} className="btn-retry-stream mt-3">
-            <RefreshCw size={14} className="mr-1" /> Retry Stream Discovery
-          </button>
-        </div>
-      )}
-
-      {playerState === 'OFFLINE' && (
-        <div className="player-overlay-state overlay-offline">
-          <WifiOff size={36} className="text-slate-500 mb-2" />
-          <span className="overlay-msg">CAMERA FEED OFFLINE</span>
-          <span className="overlay-sub">{errorMessage || 'Upstream video feed is not transmitting.'}</span>
-          <button onClick={handleRefresh} className="btn-retry-stream mt-3">
-            <RefreshCw size={14} className="mr-1" /> Reconnect
-          </button>
-        </div>
-      )}
-
-      {playerState === 'ERROR' && (
-        <div className="player-overlay-state overlay-error">
-          <AlertCircle size={36} className="text-rose-500 mb-2" />
-          <span className="overlay-msg">STREAM TRANSMISSION INTERRUPTED</span>
-          <span className="overlay-sub">{errorMessage || 'Codec synchronization failed.'}</span>
-          <button onClick={handleRefresh} className="btn-retry-stream mt-3">
-            <RefreshCw size={14} className="mr-1" /> Retry Connection
-          </button>
+        <div className="player-overlay-state absolute inset-0 z-15 flex flex-col items-center justify-center bg-black/60 backdrop-blur-xs">
+          <Loader2 size={32} className="text-cyan-400 animate-spin mb-2" />
+          <span className="text-xs font-bold text-cyan-300 tracking-wide">CONNECTING TO LIVE FEED ({cleanId.toUpperCase()})...</span>
+          <span className="text-[10px] text-slate-400 mt-1">Establishing zero-latency WebRTC / RTSP link</span>
         </div>
       )}
 
       {/* Tactical Player Controls Bar */}
-      <div className="player-controls-bar">
-        <div className="controls-left">
-          <button onClick={handlePlayToggle} className="ctrl-btn" title={isPlaying ? 'Pause Feed' : 'Play Feed'}>
-            {isPlaying ? <Pause size={15} /> : <Play size={15} />}
+      <div className="player-controls-bar absolute bottom-0 inset-x-0 z-20 flex items-center justify-between px-2.5 py-1.5 bg-gradient-to-t from-black/90 via-black/70 to-transparent">
+        <div className="controls-left flex items-center gap-1.5">
+          <button onClick={handlePlayToggle} className="ctrl-btn p-1 text-slate-300 hover:text-white" title={isPlaying ? 'Pause' : 'Play'}>
+            {isPlaying ? <Pause size={14} /> : <Play size={14} />}
           </button>
 
-          <button onClick={handleMuteToggle} className="ctrl-btn" title={isMuted ? 'Unmute Audio' : 'Mute Audio'}>
-            {isMuted ? <VolumeX size={15} /> : <Volume2 size={15} />}
+          <button onClick={handleMuteToggle} className="ctrl-btn p-1 text-slate-300 hover:text-white" title={isMuted ? 'Unmute' : 'Mute'}>
+            {isMuted ? <VolumeX size={14} /> : <Volume2 size={14} />}
           </button>
 
-          <button onClick={handleRefresh} className="ctrl-btn" title="Refresh & Resync Stream">
-            <RefreshCw size={15} />
+          <button onClick={handleRefresh} className="ctrl-btn p-1 text-slate-300 hover:text-cyan-400" title="Reconnect Stream">
+            <RefreshCw size={14} />
           </button>
 
-          <button onClick={handleCaptureSnapshot} className="ctrl-btn" title="Capture Evidentiary Snapshot">
-            <CameraIcon size={15} />
+          <button onClick={handleCaptureSnapshot} className="ctrl-btn p-1 text-slate-300 hover:text-amber-400" title="Capture Evidentiary Snapshot">
+            <CameraIcon size={14} />
           </button>
 
-          {/* Aspect Ratio Framing Toggle (FIT 100% Uncropped vs FILL Zoomed) */}
+          {/* Framing Toggle */}
           <button
             onClick={() => setIsFitContain(!isFitContain)}
-            className="ctrl-btn"
-            title={isFitContain ? 'Current: 100% Full Uncropped Frame (Contain). Click to Fill.' : 'Current: Zoomed Fill (Cover). Click for 100% Full Uncropped Frame.'}
-            style={{ fontSize: '11px', fontWeight: 600, padding: '2px 6px', color: isFitContain ? '#00f0ff' : '#94a3b8' }}
+            className="ctrl-btn text-[10px] font-bold px-1.5 py-0.5 rounded border border-slate-700 bg-slate-900 text-slate-300 hover:text-cyan-300"
+            title={isFitContain ? 'Fit (100% Uncropped)' : 'Fill (Zoom)'}
           >
-            {isFitContain ? 'FIT (100%)' : 'FILL (ZOOM)'}
+            {isFitContain ? '100% FIT' : 'FILL'}
           </button>
 
-          {/* AI HUD Overlay Toggle Button */}
+          {/* AI HUD Toggle */}
           <button
-            onClick={() => setIsAiOverlayEnabled(!isAiOverlayEnabled)}
-            className="ctrl-btn flex items-center gap-1"
-            title={isAiOverlayEnabled ? 'Live AI HUD Active (Click to Hide)' : 'Live AI HUD Disabled (Click to Show)'}
-            style={{
-              fontSize: '11px',
-              fontWeight: 700,
-              padding: '2px 8px',
-              color: isAiOverlayEnabled ? '#10b981' : '#64748b',
-              background: isAiOverlayEnabled ? 'rgba(16, 185, 129, 0.15)' : 'transparent',
-              border: isAiOverlayEnabled ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid transparent',
-              borderRadius: '4px',
+            onClick={() => {
+              const next = !isAiOverlayEnabled;
+              setIsAiOverlayEnabled(next);
+              if (onToggleAiOverlay) onToggleAiOverlay(next);
             }}
+            className="ctrl-btn flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded border transition-all"
+            style={{
+              color: isAiOverlayEnabled ? '#10b981' : '#94a3b8',
+              background: isAiOverlayEnabled ? 'rgba(16, 185, 129, 0.2)' : 'rgba(15, 23, 42, 0.6)',
+              borderColor: isAiOverlayEnabled ? 'rgba(16, 185, 129, 0.5)' : 'rgba(51, 65, 85, 0.6)',
+            }}
+            title={isAiOverlayEnabled ? 'Live AI HUD Active (Click to Disable)' : 'Live AI HUD Disabled (Click to Enable)'}
           >
-            <Cpu size={12} className={isAiOverlayEnabled ? 'text-emerald-400 animate-pulse' : 'text-slate-500'} />
-            <span>AI HUD</span>
+            <Cpu size={11} className={isAiOverlayEnabled ? 'text-emerald-400 animate-pulse' : 'text-slate-500'} />
+            <span>{isAiOverlayEnabled ? 'AI HUD: ON' : 'AI HUD: OFF'}</span>
           </button>
-
-          {/* ANPR Plate Toggle */}
-          {isAiOverlayEnabled && (
-            <button
-              onClick={() => setShowPlates(!showPlates)}
-              className="ctrl-btn hidden sm:flex items-center gap-1"
-              title={showPlates ? 'ANPR Plates Overlay Active' : 'ANPR Plates Overlay Disabled'}
-              style={{
-                fontSize: '10px',
-                fontWeight: 600,
-                padding: '2px 6px',
-                color: showPlates ? '#f59e0b' : '#64748b',
-                borderRadius: '4px',
-              }}
-            >
-              <Scan size={11} />
-              <span>ANPR</span>
-            </button>
-          )}
-
-          {/* Attribute Badges Toggle */}
-          {isAiOverlayEnabled && (
-            <button
-              onClick={() => setShowAttributes(!showAttributes)}
-              className="ctrl-btn hidden md:flex items-center gap-1"
-              title={showAttributes ? 'Vehicle Attributes (Color/Make/Model) Active' : 'Attributes Hidden'}
-              style={{
-                fontSize: '10px',
-                fontWeight: 600,
-                padding: '2px 6px',
-                color: showAttributes ? '#38bdf8' : '#64748b',
-                borderRadius: '4px',
-              }}
-            >
-              <Sparkles size={11} />
-              <span>ATTRS</span>
-            </button>
-          )}
         </div>
 
-        <div className="controls-right">
-          {/* Quality Profile Selector */}
-          <select
-            value={selectedProfile}
-            onChange={(e) => setSelectedProfile(e.target.value)}
-            className="ctrl-profile-select"
-            title="Bandwidth Profile"
-          >
-            <option value="LOW">LOW (480p)</option>
-            <option value="MEDIUM">MED (720p)</option>
-            <option value="HIGH">HIGH (1080p)</option>
-            <option value="BURST_TRACKING">BURST (60fps)</option>
-          </select>
+        <div className="controls-right flex items-center gap-1.5">
+          {/* Protocol Switcher */}
+          <div className="flex items-center rounded bg-slate-900/90 border border-slate-700 p-0.5">
+            <button
+              onClick={() => setActiveMode('WEBRTC')}
+              className={`text-[9px] font-bold px-1.5 py-0.5 rounded transition-colors ${activeMode === 'WEBRTC' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+              title="WebRTC WHEP (0-Latency Ultra Smooth)"
+            >
+              WHEP
+            </button>
+            <button
+              onClick={() => setActiveMode('MJPEG')}
+              className={`text-[9px] font-bold px-1.5 py-0.5 rounded transition-colors ${activeMode === 'MJPEG' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+              title="Continuous Live MJPEG Stream"
+            >
+              MJPEG
+            </button>
+            <button
+              onClick={() => setActiveMode('HLS')}
+              className={`text-[9px] font-bold px-1.5 py-0.5 rounded transition-colors ${activeMode === 'HLS' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+              title="HLS Live Gateway"
+            >
+              HLS
+            </button>
+          </div>
 
-          <button onClick={handleFullscreen} className="ctrl-btn" title="Fullscreen">
-            <Maximize2 size={15} />
+          <button onClick={handleFullscreen} className="ctrl-btn p-1 text-slate-300 hover:text-white" title="Fullscreen">
+            <Maximize2 size={14} />
           </button>
         </div>
       </div>

@@ -1,20 +1,39 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="PHANTOM - Statewide CCTV Intelligence & Tactical Command Platform for Gujarat CCTV Hackathon 2026"
+      content="PHANTOM - Gujarat Police AI CCTV Surveillance & Tactical Command Center"
     />
-    <title>PHANTOM // CCTV Intelligence & Command Platform</title>
+    <title>PHANTOM // Gujarat Police AI CCTV Command Center</title>
 
-    <!-- Google Fonts: Space Grotesk, Inter, JetBrains Mono -->
+    <!-- Anti-Flash Theme Pre-Init -->
+    <script>
+      (function() {
+        try {
+          var saved = localStorage.getItem('phantom_surveillance_theme');
+          var theme = saved || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+          document.documentElement.setAttribute('data-theme', theme);
+        } catch (e) {}
+      })();
+    </script>
+
+    <!-- Google Fonts: Orbitron, Rajdhani, Space Grotesk, Inter, JetBrains Mono -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700;800&family=Orbitron:wght@600;700;800;900&family=Rajdhani:wght@500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap"
       rel="stylesheet"
+    />
+
+    <!-- Leaflet CSS for CCTV GIS Map -->
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
     />
   </head>
   <body>

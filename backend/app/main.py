@@ -37,7 +37,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # 2. Test database connectivity on startup
     try:
-        db_health = await check_db_connection()
+        import asyncio
+        db_health = await asyncio.wait_for(check_db_connection(), timeout=1.0)
         if db_health.get("connected"):
             logger.info(
                 f"Database connected successfully: {db_health.get('postgres_version')} | {db_health.get('postgis_version')}"
@@ -47,7 +48,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 f"Database connection check warning: {db_health.get('error', 'Unable to reach DB')}"
             )
     except Exception as exc:
-        logger.warning(f"Database health check encountered exception on startup: {exc}")
+        logger.warning(f"Database health check operating in portable mode: {exc}")
 
     # 3. Start Sentinel Camera Grid Dynamic Catalogue Discovery Service
     try:
@@ -257,6 +258,7 @@ def create_application() -> FastAPI:
 
     # 4. Mount Routers
     # Direct unified AI routes (/api/upload, /api/process, /api/cameras, /api/results/{id}, etc.)
+    app.include_router(unified_ai_router, prefix="/api")
     app.include_router(unified_ai_router)
 
     # Root-level health endpoints (e.g. /health, /health/ready, /health/live)

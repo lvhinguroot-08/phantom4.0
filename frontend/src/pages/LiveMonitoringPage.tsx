@@ -1,93 +1,38 @@
 import React, { useState, useEffect } from 'react';
 import { Camera } from '../types';
-import { camerasApi } from '../api/cameras';
 import { CameraCard } from '../components/camera/CameraCard';
 import { CameraPlayer } from '../components/camera/CameraPlayer';
 import { CameraAiInfoPanel } from '../components/camera/CameraAiInfoPanel';
 import { LoadingState } from '../components/common/LoadingError';
+import { camerasApi } from '../api/cameras';
 import {
-  LayoutGrid,
-  Grid3X3,
-  Grid,
-  Square,
+  Tv,
   Filter,
   RefreshCw,
+  LayoutGrid,
+  Grid,
+  Square,
+  Grid3X3,
   Layers,
-  Cpu,
-  Car,
-  User,
-  ShieldAlert,
   X,
-  Scan,
+  MapPin,
+  Radio,
   Sparkles,
-  Maximize2,
+  Cpu,
 } from 'lucide-react';
 
 export const LiveMonitoringPage: React.FC = () => {
   const [cameras, setCameras] = useState<Camera[]>([]);
-  const [layout, setLayout] = useState<'1' | '4' | '9' | '16' | '30'>('30');
+  const [layout, setLayout] = useState<'1' | '4' | '9' | '16' | '30'>('9');
   const [filterDistrict, setFilterDistrict] = useState<string>('ALL');
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [selectedCamera, setSelectedCamera] = useState<Camera | null>(null);
-  const [globalAiHud, setGlobalAiHud] = useState<boolean>(true);
-  const [sentinelState, setSentinelState] = useState<{
-    status: string;
-    catalogue: string;
-    total: number;
-    live: number;
-    error?: string;
-    reconnect_attempt: number;
-  }>({
-    status: 'ONLINE',
-    catalogue: 'SYNCED',
-    total: 0,
-    live: 0,
-    reconnect_attempt: 0,
-  });
-
-  const fetchSentinelHealth = async () => {
-    try {
-      const res = await fetch('/api/v1/cameras/health/sentinel');
-      if (res.ok) {
-        const json = await res.json();
-        if (json.success && json.data) {
-          const d = json.data;
-          setSentinelState({
-            status: d.sentinel_connection || 'ONLINE',
-            catalogue: d.catalogue_state || 'SYNCED',
-            total: d.total_discovered_cameras || 0,
-            live: d.live_cameras || 0,
-            error: d.last_error,
-            reconnect_attempt: d.reconnect_attempt || 0,
-          });
-        }
-      }
-    } catch {
-      setSentinelState((prev) => ({
-        ...prev,
-        status: 'DEGRADED',
-        catalogue: 'OFFLINE',
-      }));
-    }
-  };
+  const [isGlobalAiEnabled, setIsGlobalAiEnabled] = useState<boolean>(false);
 
   const fetchCameras = async () => {
     setIsLoading(true);
     try {
-      let loaded: Camera[] = [];
-      try {
-        const res = await camerasApi.list({ page_size: 50 });
-        if (res && res.data && res.data.length > 0) {
-          loaded = res.data;
-        }
-      } catch {
-        // Fallback
-      }
-
-      if (loaded.length === 0) {
-        loaded = await camerasApi.fetchDirectCorp8Catalog();
-      }
-
+      const loaded = await camerasApi.fetchDirectCorp8Catalog();
       setCameras(loaded);
     } finally {
       setIsLoading(false);
@@ -96,11 +41,6 @@ export const LiveMonitoringPage: React.FC = () => {
 
   useEffect(() => {
     fetchCameras();
-    fetchSentinelHealth();
-    const interval = setInterval(() => {
-      fetchSentinelHealth();
-    }, 5000);
-    return () => clearInterval(interval);
   }, []);
 
   const districts = Array.from(new Set(cameras.map((c) => c.district).filter(Boolean)));
@@ -113,210 +53,444 @@ export const LiveMonitoringPage: React.FC = () => {
   const countToDisplay = layout === '1' ? 1 : layout === '4' ? 4 : layout === '9' ? 9 : layout === '16' ? 16 : 30;
   const displayCameras = filteredCameras.slice(0, countToDisplay);
 
-  const isSentinelDegraded = sentinelState.status !== 'ONLINE';
+  const getGridColsStyle = () => {
+    switch (layout) {
+      case '1':
+        return { gridTemplateColumns: '1fr', maxWidth: '1200px', margin: '0 auto' };
+      case '4':
+        return { gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px' };
+      case '9':
+        return { gridTemplateColumns: 'repeat(3, 1fr)', gap: '14px' };
+      case '16':
+        return { gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' };
+      case '30':
+        return { gridTemplateColumns: 'repeat(6, 1fr)', gap: '10px' };
+      default:
+        return { gridTemplateColumns: 'repeat(3, 1fr)', gap: '14px' };
+    }
+  };
 
   return (
-    <div className="live-monitoring-page">
-      {/* Sentinel Connection & Resilience Status Banner */}
-      <div className={`flex flex-wrap items-center justify-between gap-3 px-4 py-2 text-xs font-mono border-b ${
-        isSentinelDegraded
-          ? 'bg-rose-950/80 border-rose-500/40 text-rose-200'
-          : 'bg-slate-900/95 border-cyan-500/20 text-slate-300'
-      }`}>
-        <div className="flex items-center gap-4 flex-wrap">
-          <div className="flex items-center gap-2">
-            <span className="text-slate-400 font-bold">SENTINEL CONNECTION:</span>
-            {isSentinelDegraded ? (
-              <span className="flex items-center gap-1.5 text-amber-400 font-bold px-2 py-0.5 rounded bg-amber-950/70 border border-amber-500/40">
-                <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
-                ● DEGRADED
-              </span>
-            ) : (
-              <span className="flex items-center gap-1.5 text-emerald-400 font-bold px-2 py-0.5 rounded bg-emerald-950/70 border border-emerald-500/40">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                ● ONLINE
-              </span>
-            )}
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span className="text-slate-400 font-bold">CAMERA CATALOGUE:</span>
-            {isSentinelDegraded ? (
-              <span className="flex items-center gap-1 text-rose-300 font-bold">
-                ○ OFFLINE (RETRYING AUTOMATICALLY...)
-              </span>
-            ) : (
-              <span className="flex items-center gap-1 text-emerald-300 font-bold">
-                ● SYNCED ({sentinelState.total || filteredCameras.length} DISCOVERED)
-              </span>
-            )}
-          </div>
-
-          {isSentinelDegraded && sentinelState.reconnect_attempt > 0 && (
-            <span className="text-amber-300 text-xs animate-pulse">
-              Retry Attempt #{sentinelState.reconnect_attempt} (Exponential Backoff)
-            </span>
-          )}
-        </div>
-
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => {
-              fetchCameras();
-              fetchSentinelHealth();
+    <div className="live-monitoring-page" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
+      {/* Scaled-Up Prominent Surveillance Control Bar */}
+      <div
+        style={{
+          background: 'var(--glass-bg)',
+          backdropFilter: 'var(--glass-blur)',
+          WebkitBackdropFilter: 'var(--glass-blur)',
+          border: '1px solid var(--border-medium)',
+          borderRadius: 'var(--radius-lg)',
+          padding: '16px 22px',
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '16px',
+          boxShadow: 'var(--card-shadow)',
+        }}
+      >
+        {/* Left: Prominent Title & Live Badge */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+          <div
+            style={{
+              width: '46px',
+              height: '46px',
+              borderRadius: 'var(--radius-md)',
+              background: 'rgba(0, 240, 255, 0.12)',
+              border: '1px solid rgba(0, 240, 255, 0.4)',
+              color: 'var(--accent-cyan)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 0 15px rgba(0, 240, 255, 0.25)',
             }}
-            className="flex items-center gap-1 px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs border border-slate-700 transition-colors"
-            title="Refresh Ingest Stream Registry"
           >
-            <RefreshCw size={12} className={isLoading ? 'animate-spin' : ''} />
-            <span>SYNC CATALOGUE</span>
-          </button>
+            <Tv size={24} />
+          </div>
 
-          {/* Master AI HUD Toggle Switch */}
-          <button
-            onClick={() => setGlobalAiHud(!globalAiHud)}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-bold transition-all shadow ${
-              globalAiHud
-                ? 'bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-400/50 shadow-emerald-900/40'
-                : 'bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700'
-            }`}
-            title="Toggle AI Bounding Boxes & Attributes across all video streams"
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span
+                style={{
+                  width: '9px',
+                  height: '9px',
+                  borderRadius: '50%',
+                  background: 'var(--accent-healthy)',
+                  boxShadow: '0 0 10px var(--accent-healthy)',
+                  display: 'inline-block',
+                }}
+              />
+              <h1
+                style={{
+                  fontFamily: 'var(--font-heading)',
+                  fontSize: '1.25rem',
+                  fontWeight: 900,
+                  color: '#fff',
+                  letterSpacing: '1.5px',
+                  margin: 0,
+                }}
+              >
+                LIVE CCTV MONITORING MATRIX
+              </h1>
+              <span
+                className="badge-live"
+                style={{
+                  fontSize: '0.75rem',
+                  padding: '4px 10px',
+                  borderRadius: 'var(--radius-sm)',
+                  fontWeight: 800,
+                  fontFamily: 'var(--font-mono)',
+                  letterSpacing: '0.5px',
+                }}
+              >
+                {filteredCameras.length} / 30 STREAMS LIVE
+              </span>
+            </div>
+            <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: '4px 0 0 0', fontFamily: 'var(--font-body)' }}>
+              Real-time high-definition CCTV video feeds streaming across Gujarat highways and city checkpoints
+            </p>
+          </div>
+        </div>
+
+        {/* Right: Scaled Up District Filter & Layout Switcher */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+          {/* Scaled-Up District & City Filter Dropdown */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              background: 'var(--bg-tertiary)',
+              border: '1px solid var(--border-medium)',
+              borderRadius: 'var(--radius-md)',
+              padding: '8px 16px',
+              boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.1)',
+            }}
           >
-            <Cpu size={13} className={globalAiHud ? 'animate-pulse' : ''} />
-            <span>GLOBAL AI HUD: {globalAiHud ? 'ACTIVE' : 'OFF'}</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Top Controls Toolbar */}
-      <div className="monitoring-toolbar">
-        <div className="toolbar-left">
-          <h2 className="page-title">LIVE MULTI-CAMERA MONITORING WALL</h2>
-          <span className="live-pill">● {filteredCameras.length} STREAMS INGESTED</span>
-        </div>
-
-        <div className="toolbar-right">
-          {/* District Filter */}
-          <div className="district-filter-select">
-            <Filter size={12} className="text-cyan" />
+            <MapPin size={16} className="text-cyan" />
+            <span style={{ fontSize: '0.8rem', fontFamily: 'var(--font-tactical)', fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.5px' }}>
+              DISTRICT:
+            </span>
             <select
               value={filterDistrict}
               onChange={(e) => setFilterDistrict(e.target.value)}
-              className="registry-select"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: '#fff',
+                fontFamily: 'var(--font-heading)',
+                fontSize: '0.88rem',
+                fontWeight: 700,
+                outline: 'none',
+                cursor: 'pointer',
+                minWidth: '160px',
+              }}
             >
-              <option value="ALL">ALL DISTRICTS ({cameras.length})</option>
+              <option value="ALL" style={{ background: '#0a101d', color: '#fff' }}>
+                ALL GUJARAT ({cameras.length})
+              </option>
               {districts.map((d) => (
-                <option key={d} value={d}>
-                  {d}
+                <option key={d} value={d} style={{ background: '#0a101d', color: '#fff' }}>
+                  {d?.toUpperCase()} ({cameras.filter((c) => c.district === d).length} CAMS)
                 </option>
               ))}
             </select>
           </div>
 
-          {/* Layout Switcher */}
-          <div className="layout-btn-group">
+          {/* Scaled-Up Matrix Layout Switcher (1x1, 2x2, 3x3, 4x4, ALL 30) */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              background: 'var(--bg-tertiary)',
+              border: '1px solid var(--border-medium)',
+              borderRadius: 'var(--radius-md)',
+              padding: '4px',
+              gap: '4px',
+            }}
+          >
             <button
               onClick={() => setLayout('1')}
-              className={`btn-layout ${layout === '1' ? 'active' : ''}`}
-              title="1-Way Focused Mode"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '8px 14px',
+                borderRadius: 'var(--radius-sm)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '0.82rem',
+                fontWeight: 800,
+                border: 'none',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                background: layout === '1' ? 'var(--accent-cyan)' : 'transparent',
+                color: layout === '1' ? '#070b14' : 'var(--text-secondary)',
+                boxShadow: layout === '1' ? '0 0 14px var(--accent-cyan-dim)' : 'none',
+              }}
+              title="1x1 Single Focus Stream"
             >
-              <Square size={13} />
+              <Square size={15} />
               <span>1x1</span>
             </button>
+
             <button
               onClick={() => setLayout('4')}
-              className={`btn-layout ${layout === '4' ? 'active' : ''}`}
-              title="4-Way Quad (2x2)"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '8px 14px',
+                borderRadius: 'var(--radius-sm)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '0.82rem',
+                fontWeight: 800,
+                border: 'none',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                background: layout === '4' ? 'var(--accent-cyan)' : 'transparent',
+                color: layout === '4' ? '#070b14' : 'var(--text-secondary)',
+                boxShadow: layout === '4' ? '0 0 14px var(--accent-cyan-dim)' : 'none',
+              }}
+              title="2x2 Quad Matrix"
             >
-              <LayoutGrid size={13} />
+              <LayoutGrid size={15} />
               <span>2x2</span>
             </button>
+
             <button
               onClick={() => setLayout('9')}
-              className={`btn-layout ${layout === '9' ? 'active' : ''}`}
-              title="9-Way Matrix (3x3)"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '8px 14px',
+                borderRadius: 'var(--radius-sm)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '0.82rem',
+                fontWeight: 800,
+                border: 'none',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                background: layout === '9' ? 'var(--accent-cyan)' : 'transparent',
+                color: layout === '9' ? '#070b14' : 'var(--text-secondary)',
+                boxShadow: layout === '9' ? '0 0 14px var(--accent-cyan-dim)' : 'none',
+              }}
+              title="3x3 Tactical Matrix"
             >
-              <Grid3X3 size={13} />
+              <Grid3X3 size={15} />
               <span>3x3</span>
             </button>
+
             <button
               onClick={() => setLayout('16')}
-              className={`btn-layout ${layout === '16' ? 'active' : ''}`}
-              title="16-Way High Density (4x4)"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '8px 14px',
+                borderRadius: 'var(--radius-sm)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '0.82rem',
+                fontWeight: 800,
+                border: 'none',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                background: layout === '16' ? 'var(--accent-cyan)' : 'transparent',
+                color: layout === '16' ? '#070b14' : 'var(--text-secondary)',
+                boxShadow: layout === '16' ? '0 0 14px var(--accent-cyan-dim)' : 'none',
+              }}
+              title="4x4 High Density Wall"
             >
-              <Grid size={13} />
+              <Grid size={15} />
               <span>4x4</span>
             </button>
+
             <button
               onClick={() => setLayout('30')}
-              className={`btn-layout ${layout === '30' ? 'active' : ''}`}
-              title="All 30 Live Feeds"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '8px 14px',
+                borderRadius: 'var(--radius-sm)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '0.82rem',
+                fontWeight: 800,
+                border: 'none',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                background: layout === '30' ? 'var(--accent-cyan)' : 'transparent',
+                color: layout === '30' ? '#070b14' : 'var(--text-secondary)',
+                boxShadow: layout === '30' ? '0 0 14px var(--accent-cyan-dim)' : 'none',
+              }}
+              title="All 30 Live Gujarat Cameras"
             >
-              <Layers size={13} />
+              <Layers size={15} />
               <span>ALL 30</span>
             </button>
           </div>
 
-          <button onClick={fetchCameras} className="btn-icon-action" title="Refresh Streams">
-            <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} />
+          {/* Master AI Detection Toggle Button (Manual On/Off) */}
+          <button
+            onClick={() => setIsGlobalAiEnabled(!isGlobalAiEnabled)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '9px 18px',
+              borderRadius: 'var(--radius-md)',
+              fontFamily: 'var(--font-heading)',
+              fontSize: '0.82rem',
+              fontWeight: 800,
+              letterSpacing: '0.5px',
+              cursor: 'pointer',
+              transition: 'all 0.25s ease',
+              background: isGlobalAiEnabled
+                ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.25) 0%, rgba(5, 150, 105, 0.45) 100%)'
+                : 'rgba(15, 23, 42, 0.85)',
+              color: isGlobalAiEnabled ? '#10b981' : 'var(--text-secondary)',
+              border: isGlobalAiEnabled ? '1px solid #10b981' : '1px solid var(--border-medium)',
+              boxShadow: isGlobalAiEnabled ? '0 0 16px rgba(16, 185, 129, 0.4)' : 'none',
+            }}
+            title={isGlobalAiEnabled ? 'Click to Pause AI Detection (Show Clean Footage Only)' : 'Click to Activate Real-Time AI Detection & HUD'}
+          >
+            <Cpu size={16} className={isGlobalAiEnabled ? 'text-emerald-400 animate-pulse' : 'text-slate-500'} />
+            <span>{isGlobalAiEnabled ? '⚡ AI DETECTION: ACTIVE' : '🤖 AI DETECTION: OFF'}</span>
+          </button>
+
+          {/* Refresh Button */}
+          <button
+            onClick={fetchCameras}
+            className="icon-btn highlight-btn"
+            style={{
+              padding: '10px 14px',
+              height: 'auto',
+              width: 'auto',
+              borderRadius: 'var(--radius-md)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              fontFamily: 'var(--font-mono)',
+              fontSize: '0.8rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+            }}
+            title="Refresh All 30 Camera Streams"
+          >
+            <RefreshCw size={16} className={isLoading ? 'animate-spin' : ''} />
+            <span>REFRESH</span>
           </button>
         </div>
       </div>
 
-      {/* Dynamic Responsive Video Grid */}
+      {/* Dynamic Scaled Camera Matrix Grid */}
       {isLoading ? (
-        <LoadingState message="Establishing HLS stream sessions across surveillance grid..." />
+        <LoadingState message="Establishing HLS stream sessions across Gujarat surveillance grid..." />
       ) : (
-        <div className={`monitoring-grid grid-layout-${layout}`}>
+        <div style={{ display: 'grid', ...getGridColsStyle() }}>
           {displayCameras.map((cam) => (
             <CameraCard
               key={cam.id}
               camera={cam}
               isFocused={selectedCamera?.id === cam.id}
               onSelect={setSelectedCamera}
+              isAiOverlayEnabled={isGlobalAiEnabled}
             />
           ))}
         </div>
       )}
 
-      {/* Focused Camera Modal & Live Forensic Inspector */}
+      {/* Tactical Live Inspector Modal */}
       {selectedCamera && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-cyan-500/40 rounded-xl w-full max-w-5xl overflow-hidden shadow-2xl flex flex-col max-h-[92vh]">
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1000,
+            background: 'rgba(0, 0, 0, 0.88)',
+            backdropFilter: 'blur(12px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '24px',
+          }}
+        >
+          <div
+            style={{
+              background: 'var(--bg-card)',
+              border: '1px solid var(--border-medium)',
+              borderRadius: 'var(--radius-lg)',
+              width: '100%',
+              maxWidth: '1100px',
+              overflow: 'hidden',
+              boxShadow: 'var(--shadow-3d)',
+              maxHeight: '92vh',
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+          >
             {/* Modal Header */}
-            <div className="px-4 py-3 bg-slate-950/80 border-b border-cyan-500/20 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                <h3 className="font-bold text-white tracking-wide">
+            <div
+              style={{
+                padding: '14px 20px',
+                background: 'var(--bg-secondary)',
+                borderBottom: '1px solid var(--border-subtle)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <span
+                  style={{
+                    width: '8px',
+                    height: '8px',
+                    borderRadius: '50%',
+                    background: 'var(--accent-healthy)',
+                    boxShadow: '0 0 8px var(--accent-healthy)',
+                  }}
+                />
+                <span style={{ fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: '0.95rem', color: '#fff', letterSpacing: '1px' }}>
                   TACTICAL LIVE INSPECTOR // {selectedCamera.camera_code} - {selectedCamera.name}
-                </h3>
-                <span className="bg-cyan-950 text-cyan-400 border border-cyan-500/30 text-xs px-2 py-0.5 rounded font-mono">
+                </span>
+                <span
+                  style={{
+                    background: 'var(--accent-cyan-dim)',
+                    color: 'var(--accent-cyan)',
+                    border: '1px solid var(--border-medium)',
+                    fontSize: '0.72rem',
+                    padding: '3px 10px',
+                    borderRadius: 'var(--radius-sm)',
+                    fontFamily: 'var(--font-mono)',
+                    fontWeight: 800,
+                  }}
+                >
                   {selectedCamera.district || 'GUJARAT POLICE'}
                 </span>
               </div>
               <button
                 onClick={() => setSelectedCamera(null)}
-                className="text-slate-400 hover:text-white p-1 rounded hover:bg-slate-800 transition"
+                className="icon-btn"
+                style={{ width: '32px', height: '32px' }}
               >
                 <X size={18} />
               </button>
             </div>
 
-            {/* Modal Body: Magnified Live Player + Forensic Live Log */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 p-4 overflow-y-auto">
-              {/* Video Player */}
-              <div className="lg:col-span-2 aspect-video bg-black rounded-lg overflow-hidden border border-slate-800 relative">
+            {/* Modal Body */}
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '16px', padding: '20px', overflowY: 'auto' }}>
+              <div style={{ aspectRatio: '16/9', background: '#000', borderRadius: 'var(--radius-md)', overflow: 'hidden', boxShadow: '0 8px 30px rgba(0,0,0,0.7)' }}>
                 <CameraPlayer
                   camera={selectedCamera}
                   status={selectedCamera.status}
                   fps={selectedCamera.fps || 25}
                   quality="EXCELLENT"
+                  isAiOverlayEnabled={isGlobalAiEnabled}
                 />
               </div>
 
-              {/* Live AI Detections & Real-time Telemetry Panel */}
-              <div className="lg:col-span-1">
-                <CameraAiInfoPanel camera={selectedCamera} className="h-full" />
+              <div>
+                <CameraAiInfoPanel camera={selectedCamera} />
               </div>
             </div>
           </div>

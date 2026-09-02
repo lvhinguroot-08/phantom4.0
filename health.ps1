@@ -22,7 +22,7 @@ $checks = @(
 foreach ($c in $checks) {
     try {
         $t0 = Get-Date
-        $resp = Invoke-WebRequest -Uri $c.Url -Method Get -TimeoutSec 4 -UseBasicParsing -ErrorAction Stop
+        $resp = Invoke-WebRequest -Uri $c.Url -Method Get -TimeoutSec 4 -ErrorAction Stop
         $dur = [Math]::Round(((Get-Date) - $t0).TotalMilliseconds, 2)
         if ($resp.StatusCode -eq 200) {
             Write-Host ("  [ PASS ] {0,-35} HTTP 200 OK ({1} ms)" -f $c.Name, $dur) -ForegroundColor Green

@@ -1,28 +1,36 @@
 import React, { useState } from 'react';
 import { ThemeProvider } from './context/ThemeContext';
 import { BackendStatusProvider } from './context/BackendStatusContext';
-import { AuthProvider } from './context/AuthContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { RealtimeEventProvider } from './context/RealtimeEventContext';
 import { Header } from './components/common/Header';
 import { Sidebar, NavView } from './components/common/Sidebar';
+import { LoginPage } from './pages/LoginPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { LiveMonitoringPage } from './pages/LiveMonitoringPage';
 import { CameraRegistryPage } from './pages/CameraRegistryPage';
+import { AICopilotPage } from './pages/AICopilotPage';
 import { ANPRVehiclesPage } from './pages/ANPRVehiclesPage';
-import { GISMapPage } from './pages/GISMapPage';
+import { WatchlistPage } from './pages/WatchlistPage';
 import { AlertsIncidentsPage } from './pages/AlertsIncidentsPage';
-import { SystemHealthPage } from './pages/SystemHealthPage';
-import { VehicleIntelligencePage } from './pages/VehicleIntelligencePage';
 import { InvestigationsPage } from './pages/InvestigationsPage';
+import { GISMapPage } from './pages/GISMapPage';
+import { SystemHealthPage } from './pages/SystemHealthPage';
+import { SettingsPage } from './pages/SettingsPage';
 
 export const AppContent: React.FC = () => {
+  const { isAuthenticated, login } = useAuth();
   const [activeView, setActiveView] = useState<NavView>('dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
 
   const handleNavigate = (view: NavView) => {
     setActiveView(view);
-    setIsMobileMenuOpen(false); // Close mobile drawer upon selection
+    setIsMobileMenuOpen(false);
   };
+
+  if (!isAuthenticated) {
+    return <LoginPage onLoginSuccess={(profile) => login(profile)} />;
+  }
 
   const renderActiveView = () => {
     switch (activeView) {
@@ -32,22 +40,22 @@ export const AppContent: React.FC = () => {
         return <LiveMonitoringPage />;
       case 'camera_registry':
         return <CameraRegistryPage />;
-      case 'anpr_vehicles':
+      case 'copilot':
+        return <AICopilotPage onNavigate={handleNavigate} />;
+      case 'anpr':
         return <ANPRVehiclesPage />;
-      case 'gis_map':
-      case 'coverage_gaps':
-        return <GISMapPage />;
-      case 'vehicle_tracking':
-        return <VehicleIntelligencePage />;
+      case 'watchlist':
+        return <WatchlistPage />;
+      case 'alerts':
+        return <AlertsIncidentsPage />;
       case 'investigations':
         return <InvestigationsPage />;
-      case 'alerts':
-      case 'incidents':
-        return <AlertsIncidentsPage />;
+      case 'map':
+        return <GISMapPage />;
       case 'system_health':
-      case 'stream_health':
-      case 'audit_logs':
         return <SystemHealthPage />;
+      case 'settings':
+        return <SettingsPage />;
       default:
         return <DashboardPage />;
     }
@@ -57,6 +65,7 @@ export const AppContent: React.FC = () => {
     <div className="command-center-app">
       {/* Top Command Bar */}
       <Header
+        onNavigate={handleNavigate}
         isMobileMenuOpen={isMobileMenuOpen}
         onToggleMobileMenu={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
       />

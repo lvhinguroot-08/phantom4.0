@@ -14,12 +14,10 @@ export interface ReadinessResponse {
   timestamp: string;
   database: {
     connected: boolean;
-    mode?: string;
     postgres_version?: string;
     postgis_version?: string;
     latency_ms?: number;
     error?: string;
-    warning?: string;
   };
 }
 
@@ -97,9 +95,17 @@ export interface Camera {
   reconnect_attempt?: number;
   last_error?: string;
   whep_url?: string;
-  hls_url?: string;
   fps?: number;
   streams?: CameraStream[];
+  road_name?: string;
+  street_name?: string;
+  police_station?: string;
+  direction?: string;
+  heading?: number;
+  field_of_view?: number;
+  coverage_distance?: number;
+  coverage_polygon?: [number, number][];
+  has_valid_location?: boolean;
 }
 
 export interface District {

@@ -43,8 +43,23 @@ router = APIRouter(tags=["PHANTOM 2.0 Unified AI Intelligence"])
 UPLOAD_TEMP_DIR = Path(tempfile.gettempdir()) / "phantom_uploads"
 UPLOAD_TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
-# Sample test video storage
-SAMPLE_DIR = Path(__file__).resolve().parent.parent.parent.parent.parent / "sample_assets"
+def find_sample_asset(filename: str) -> Optional[Path]:
+    """Resolves sample video asset across multiple possible working directory paths."""
+    candidates = [
+        Path(__file__).resolve().parent.parent.parent.parent.parent / "sample_assets" / filename,
+        Path(__file__).resolve().parent.parent.parent.parent.parent / "backend" / "sample_assets" / filename,
+        Path.cwd() / "sample_assets" / filename,
+        Path.cwd() / "backend" / "sample_assets" / filename,
+        Path(__file__).resolve().parent.parent.parent / "sample_assets" / filename,
+    ]
+    for c in candidates:
+        if c.is_file():
+            return c
+    return None
+
+SAMPLE_DIR = Path(__file__).resolve().parent.parent.parent.parent.parent / "backend" / "sample_assets"
+if not SAMPLE_DIR.exists():
+    SAMPLE_DIR = Path(__file__).resolve().parent.parent.parent.parent.parent / "sample_assets"
 SAMPLE_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -87,6 +102,8 @@ class ProcessJobResponse(BaseModel):
 async def upload_media_file(
     file: UploadFile = File(..., description="Image or video media file"),
 ) -> UploadResponse:
+    from app.core.security import validate_media_file_magic_bytes
+
     orig_name = file.filename or "uploaded_media.mp4"
     ext = Path(orig_name).suffix.lower()
     
@@ -94,16 +111,50 @@ async def upload_media_file(
     if ext not in valid_exts:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported file extension '{ext}'. Allowed formats: {', '.join(sorted(valid_exts))}",
+            detail=f"Security Alert: Unsupported file extension '{ext}'. Allowed formats: {', '.join(sorted(valid_exts))}",
         )
+
+    # 1. Binary Magic Bytes Security Validation
+    try:
+        header_bytes = await file.read(64)
+        await file.seek(0)
+        is_valid_magic = validate_media_file_magic_bytes(header_bytes, orig_name)
+        if not is_valid_magic:
+            logger.warning(f"File upload blocked - Invalid magic header bytes for {orig_name}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Security Validation Failed: File header signature does not match declared media format. Potential unauthorized binary payload blocked.",
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Magic byte check error: {exc}")
 
     upload_id = str(uuid.uuid4())
     saved_filename = f"{upload_id}{ext}"
     dest_path = UPLOAD_TEMP_DIR / saved_filename
 
+    # 2. Write with size limit enforcement (Max 500 MB)
+    MAX_FILE_BYTES = 500 * 1024 * 1024
+    total_written = 0
     try:
         with open(dest_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total_written += len(chunk)
+                if total_written > MAX_FILE_BYTES:
+                    buffer.close()
+                    if dest_path.is_file():
+                        os.remove(dest_path)
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail="File exceeds maximum allowed size of 500MB.",
+                    )
+                buffer.write(chunk)
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error(f"Upload write failure: {exc}")
         raise HTTPException(
@@ -269,7 +320,7 @@ async def direct_anpr_recognize(
             if cls_name in ("CAR", "TRUCK", "BUS", "MOTORCYCLE", "OTHER_VEHICLE"):
                 bx = d["bbox"]
                 vx1, vy1, vx2, vy2 = bx["x1"], bx["y1"], bx["x2"], bx["y2"]
-                plate_text, p_conf, rto_name = resolve_vehicle_license_plate(
+                plate_text, p_conf, rto_name, _ = resolve_vehicle_license_plate(
                     frame=img,
                     bbox=bx,
                     vehicle_class=cls_name,
@@ -330,14 +381,14 @@ async def start_video_processing(
     elif upload_id:
         # Check if upload_id matches a Sentinel camera or preset
         clean_id = upload_id.strip()
-        cam_sample = SAMPLE_DIR / f"{clean_id}_sample.mp4"
-        cam_real = SAMPLE_DIR / f"{clean_id}_real_cctv.mp4"
+        cam_sample = find_sample_asset(f"{clean_id}_sample.mp4")
+        cam_real = find_sample_asset(f"{clean_id}_real_cctv.mp4")
 
-        if cam_sample.exists():
+        if cam_sample and cam_sample.exists():
             temp_input_path = str(UPLOAD_TEMP_DIR / f"{uuid.uuid4()}_{clean_id}.mp4")
             shutil.copyfile(str(cam_sample), temp_input_path)
             target_path = temp_input_path
-        elif cam_real.exists():
+        elif cam_real and cam_real.exists():
             temp_input_path = str(UPLOAD_TEMP_DIR / f"{uuid.uuid4()}_{clean_id}.mp4")
             shutil.copyfile(str(cam_real), temp_input_path)
             target_path = temp_input_path
@@ -371,16 +422,15 @@ async def start_video_processing(
                 logger.warning(f"Failed to capture live clip from {clean_id}: {cap_err}")
 
         if not target_path:
-            if clean_id == "SAMPLE_TRAFFIC" or not target_path:
-                sample_path = SAMPLE_DIR / "sample_traffic_cctv.mp4"
-                if sample_path.exists():
-                    temp_input_path = str(UPLOAD_TEMP_DIR / f"{uuid.uuid4()}_sample.mp4")
-                    shutil.copyfile(str(sample_path), temp_input_path)
-                    target_path = temp_input_path
-                else:
-                    matches = list(UPLOAD_TEMP_DIR.glob(f"{upload_id}.*"))
-                    if matches:
-                        target_path = str(matches[0])
+            sample_asset = find_sample_asset(f"{clean_id}_sample.mp4") or find_sample_asset("sample_traffic_cctv.mp4") or find_sample_asset("cam01_sample.mp4")
+            if sample_asset and sample_asset.exists():
+                temp_input_path = str(UPLOAD_TEMP_DIR / f"{uuid.uuid4()}_sample.mp4")
+                shutil.copyfile(str(sample_asset), temp_input_path)
+                target_path = temp_input_path
+            else:
+                matches = list(UPLOAD_TEMP_DIR.glob(f"{upload_id}.*"))
+                if matches:
+                    target_path = str(matches[0])
 
     if not target_path or not os.path.exists(target_path):
         raise HTTPException(
@@ -415,41 +465,21 @@ async def start_video_processing(
 # ------------------------------------------------------------------------------
 # 5. Sentinel Cameras Directory & Live Snapshot
 # ------------------------------------------------------------------------------
-@router.get("/sample-cameras", summary="List all 30 Sentinel Gujarat CCTV cameras for testing")
+@router.get("/sample-cameras", summary="List all 30 Sentinel Gujarat CCTV cameras with full GIS metadata")
 async def get_sentinel_cameras():
-    """Returns the full 30 Sentinel Gujarat Police cameras for live AI testing."""
-    candidates = [
-        Path("sentinel_cameras_full.json"),
-        Path.cwd() / "sentinel_cameras_full.json",
-        Path.cwd().parent / "sentinel_cameras_full.json",
-        Path(__file__).resolve().parent.parent.parent.parent.parent / "sentinel_cameras_full.json",
-        Path(__file__).resolve().parent.parent.parent.parent.parent.parent / "sentinel_cameras_full.json",
-    ]
-    cams_list = []
-    for c in candidates:
-        if c.is_file():
-            try:
-                with open(c, "r", encoding="utf-8") as f:
-                    cams_list = json.load(f)
-                    if cams_list:
-                        break
-            except Exception:
-                pass
-
-    # Enrich with RTSP, HLS, sample availability, and inferred district
+    """Returns the full 30 Sentinel Gujarat Police cameras with real GIS metadata."""
+    from app.core.cctv_gis_data import get_all_cctv_gis_nodes
+    gis_nodes = get_all_cctv_gis_nodes()
     enriched = []
-    for c in cams_list:
+    for c in gis_nodes:
         cid = c["id"]
-        cname = c["name"]
-        sample_file = SAMPLE_DIR / f"{cid}_sample.mp4"
+        sample_file = find_sample_asset(f"{cid}_sample.mp4")
         enriched.append({
-            "id": cid,
-            "name": cname,
-            "district": "Ahmedabad" if "ahmedabad" in cname.lower() or any(k in cname.lower() for k in ["chiman", "janpath", "ongc", "paldi", "visat", "vidhyalaya", "delight", "suvidha"]) else ("Junagadh" if "junagadh" in cname.lower() or any(k in cname.lower() for k in ["timbavadi", "majewadi", "dolatpara", "char-chowk"]) else ("Gir Somnath" if "somnath" in cname.lower() else ("Rajkot" if "rajkot" in cname.lower() else ("Gandhinagar" if "adalaj" in cname.lower() or "dehgam" in cname.lower() else ("Navsari" if "bilimora" in cname.lower() or "khaparia" in cname.lower() else "Gujarat"))))),
+            **c,
             "rtsp_url": f"rtsp://103.250.160.189:8554/stream/{cid}",
             "hls_url": f"https://cctv.corp8.cloud/{cid}/index.m3u8",
             "webrtc_url": f"http://103.250.160.189:8889/stream/{cid}/whep",
-            "has_local_sample": sample_file.exists(),
+            "has_local_sample": sample_file is not None and sample_file.exists(),
             "sample_id": cid,
         })
     return {"success": True, "total": len(enriched), "cameras": enriched}
@@ -476,8 +506,8 @@ async def get_camera_live_snapshot(
 
     if frame is None:
         # Fallback to local sample clip if live RTSP momentarily unreachable
-        sample_path = SAMPLE_DIR / f"{clean_id}_sample.mp4"
-        if sample_path.exists():
+        sample_path = find_sample_asset(f"{clean_id}_sample.mp4") or find_sample_asset("sample_traffic_cctv.mp4") or find_sample_asset("cam01_sample.mp4")
+        if sample_path and sample_path.exists():
             cap_sample = cv2.VideoCapture(str(sample_path))
             if cap_sample.isOpened():
                 ret, s_frame = cap_sample.read()
@@ -510,7 +540,7 @@ async def get_camera_live_snapshot(
         cv2.putText(annotated, f"{cls_name} {int(conf*100)}%", (bx["x1"], max(18, bx["y1"] - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 240, 255), 1)
 
         if cls_name in ("CAR", "TRUCK", "BUS", "MOTORCYCLE", "OTHER_VEHICLE"):
-            plate_text, p_conf, rto_name = resolve_vehicle_license_plate(
+            plate_text, p_conf, rto_name, _ = resolve_vehicle_license_plate(
                 frame=frame,
                 bbox=bx,
                 vehicle_class=cls_name,
@@ -603,11 +633,22 @@ async def get_processed_video(job_id: str):
 # ------------------------------------------------------------------------------
 @router.get("/sample-video", summary="Get bundled sample CCTV traffic video for testing")
 async def get_sample_traffic_video():
+    sample_file = find_sample_asset("sample_traffic_cctv.mp4") or find_sample_asset("cam01_sample.mp4")
+    if sample_file and sample_file.exists():
+        return FileResponse(
+            path=str(sample_file),
+            media_type="video/mp4",
+            filename="sample_traffic_cctv.mp4",
+        )
+    
     sample_path = SAMPLE_DIR / "sample_traffic_cctv.mp4"
     if not sample_path.exists():
         # Generate automatically
-        from scripts.generate_sample_footage import generate_test_traffic_video
-        generate_test_traffic_video(str(sample_path))
+        try:
+            from scripts.generate_sample_footage import generate_test_traffic_video
+            generate_test_traffic_video(str(sample_path))
+        except Exception:
+            pass
 
     return FileResponse(
         path=str(sample_path),

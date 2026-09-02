@@ -1,0 +1,14 @@
+{
+  "name": "phantom-platform",
+  "version": "4.8.0",
+  "private": true,
+  "description": "PHANTOM - Integrated Multi-Camera AI Surveillance & Analytics Platform",
+  "scripts": {
+    "dev": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
+    "preview": "npm --prefix frontend run preview",
+    "start": "powershell -ExecutionPolicy Bypass -File ./start.ps1",
+    "stop": "powershell -ExecutionPolicy Bypass -File ./stop.ps1",
+    "restart": "powershell -ExecutionPolicy Bypass -File ./restart.ps1"
+  }
+}

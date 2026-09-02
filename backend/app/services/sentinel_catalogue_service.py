@@ -56,6 +56,8 @@ class SentinelCatalogueService:
     def _seed_initial_cameras(self):
         try:
             from app.services.stream_gateway_service import stream_gateway_service
+            from app.core.cctv_gis_data import get_cctv_gis_dict, calculate_coverage_wedge_points
+            gis_dict = get_cctv_gis_dict()
             sources = stream_gateway_service.source_registry.sources
             seen = set()
             for code, src in sources.items():
@@ -66,13 +68,32 @@ class SentinelCatalogueService:
                     continue
                 seen.add(cam_code)
                 self._is_seeded = True
+                gis_info = gis_dict.get(cam_code.lower(), {})
+                lat = gis_info.get("latitude", 23.0583)
+                lon = gis_info.get("longitude", 72.5833)
+                heading = gis_info.get("heading", 0.0)
+                fov = gis_info.get("field_of_view", 85.0)
+                cov_dist = gis_info.get("coverage_distance", 180.0)
+
                 self.discovered_cameras[cam_code] = {
                     "camera_id": cam_code,
-                    "camera_code": cam_code.upper(),
+                    "camera_code": gis_info.get("camera_code", cam_code.upper()),
                     "name": src.get("name", cam_code),
-                    "location": src.get("name", cam_code),
-                    "district": src.get("district", "Ahmedabad"),
-                    "city": src.get("district", "Ahmedabad"),
+                    "location": gis_info.get("road_name", src.get("name", cam_code)),
+                    "district": gis_info.get("district", src.get("district", "Ahmedabad")),
+                    "city": gis_info.get("city", src.get("district", "Ahmedabad")),
+                    "state": "Gujarat",
+                    "police_station": gis_info.get("police_station", "Gujarat Police HQ"),
+                    "road_name": gis_info.get("road_name", "Gujarat Highway Network"),
+                    "street_name": gis_info.get("road_name", "Gujarat Highway Network"),
+                    "direction": gis_info.get("direction", "North"),
+                    "heading": heading,
+                    "field_of_view": fov,
+                    "coverage_distance": cov_dist,
+                    "coverage_polygon": calculate_coverage_wedge_points(lat, lon, heading, fov, cov_dist),
+                    "has_valid_location": gis_info.get("has_valid_location", True),
+                    "latitude": lat,
+                    "longitude": lon,
                     "status": "ONLINE",
                     "live": True,
                     "codec": "H264",
@@ -140,13 +161,34 @@ class SentinelCatalogueService:
                 cam_id = cam.source_camera_id
                 current_seen_ids.add(cam_id)
 
+                from app.core.cctv_gis_data import get_cctv_gis_dict, calculate_coverage_wedge_points
+                gis_dict = get_cctv_gis_dict()
+                gis_info = gis_dict.get(cam_id.lower(), {})
+                lat = gis_info.get("latitude", 23.0583)
+                lon = gis_info.get("longitude", 72.5833)
+                heading = gis_info.get("heading", 0.0)
+                fov = gis_info.get("field_of_view", 85.0)
+                cov_dist = gis_info.get("coverage_distance", 180.0)
+
                 cam_dict = {
                     "camera_id": cam_id,
-                    "camera_code": f"CAM-{cam_id.zfill(3)}" if cam_id.isdigit() else cam_id,
+                    "camera_code": gis_info.get("camera_code", f"CAM-{cam_id.zfill(3)}" if cam_id.isdigit() else cam_id),
                     "name": cam.name,
-                    "location": cam.raw_location_string or cam.name,
-                    "district": cam.inferred_district,
-                    "city": cam.inferred_city,
+                    "location": gis_info.get("road_name", cam.raw_location_string or cam.name),
+                    "district": gis_info.get("district", cam.inferred_district),
+                    "city": gis_info.get("city", cam.inferred_city),
+                    "state": "Gujarat",
+                    "police_station": gis_info.get("police_station", "Gujarat Police"),
+                    "road_name": gis_info.get("road_name", "Gujarat Highway Network"),
+                    "street_name": gis_info.get("road_name", "Gujarat Highway Network"),
+                    "direction": gis_info.get("direction", "North"),
+                    "heading": heading,
+                    "field_of_view": fov,
+                    "coverage_distance": cov_dist,
+                    "coverage_polygon": calculate_coverage_wedge_points(lat, lon, heading, fov, cov_dist),
+                    "has_valid_location": gis_info.get("has_valid_location", True),
+                    "latitude": lat,
+                    "longitude": lon,
                     "status": cam.status,
                     "live": cam.status == "ONLINE",
                     "codec": cam.streams[0].codec if cam.streams else "H264",

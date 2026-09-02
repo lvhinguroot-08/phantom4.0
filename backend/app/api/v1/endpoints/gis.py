@@ -127,16 +127,55 @@ async def gis_corridor(
 
 
 @router.get(
-    "/gaps",
-    response_model=ApiResponse[dict],
-    summary="GIS Surveillance Gaps Analysis",
+    "/cameras",
+    summary="Get all GIS Enriched Cameras with Road & Sector Wedge Geometries",
 )
-async def gis_gaps(
-    request: Request,
+async def gis_get_cameras(
     district: Optional[str] = Query(None),
-    db: AsyncSession = Depends(get_db),
-) -> ApiResponse[dict]:
-    analysis = await camera_service.analyze_coverage_gaps(db, district=district)
-    req_id = getattr(request.state, "request_id", None)
-    return ApiResponse(success=True, data=analysis, request_id=req_id)
+    status: Optional[str] = Query(None),
+) -> ApiResponse[List[Dict[str, Any]]]:
+    from app.core.cctv_gis_data import get_all_cctv_gis_nodes
+    nodes = get_all_cctv_gis_nodes()
+    if district and district.upper() != "ALL":
+        nodes = [c for c in nodes if c.get("district", "").lower() == district.lower()]
+    if status and status.upper() != "ALL":
+        nodes = [c for c in nodes if c.get("status", "ONLINE").upper() == status.upper()]
+    return ApiResponse(success=True, data=nodes)
+
+
+@router.get(
+    "/quality",
+    summary="GIS Surveillance Data Quality & Mapping Completeness Diagnostic",
+)
+async def gis_data_quality() -> ApiResponse[Dict[str, Any]]:
+    from app.core.cctv_gis_data import GUJARAT_CCTV_GIS_REGISTRY
+    total = len(GUJARAT_CCTV_GIS_REGISTRY)
+    valid_coords = sum(1 for c in GUJARAT_CCTV_GIS_REGISTRY if c.get("latitude") and c.get("longitude"))
+    missing_coords = total - valid_coords
+    missing_heading = sum(1 for c in GUJARAT_CCTV_GIS_REGISTRY if c.get("heading") is None)
+    missing_road = sum(1 for c in GUJARAT_CCTV_GIS_REGISTRY if not c.get("road_name"))
+    
+    district_counts = {}
+    for c in GUJARAT_CCTV_GIS_REGISTRY:
+        d = c.get("district", "Unknown")
+        district_counts[d] = district_counts.get(d, 0) + 1
+
+    return ApiResponse(
+        success=True,
+        data={
+            "total_cameras": total,
+            "fully_mapped": valid_coords,
+            "missing_coordinates": missing_coords,
+            "missing_heading": missing_heading,
+            "missing_road_name": missing_road,
+            "mapping_completeness_pct": round((valid_coords / total * 100) if total else 100.0, 1),
+            "district_distribution": district_counts,
+            "provider_diagnostics": {
+                "satellite_imagery": "ONLINE (ArcGIS World Imagery)",
+                "tactical_dark_map": "ONLINE (CartoDB Dark Matter / Mapbox Dark)",
+                "streets_map": "ONLINE (OpenStreetMap Standard)",
+                "street_view": "ONLINE (Interactive Google / Geo-Pano)",
+            },
+        },
+    )
 

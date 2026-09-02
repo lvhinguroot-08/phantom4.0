@@ -244,20 +244,43 @@ class VehicleAttributeExtractor:
             if x2 > x1 + 5 and y2 > y1 + 5:
                 crop = frame_np[y1:y2, x1:x2]
 
-        is_vehicle = obj_class in ("CAR", "TRUCK", "BUS", "MOTORCYCLE", "TWO_WHEELER", "OTHER_VEHICLE", "VEHICLE")
+        is_vehicle = obj_class in (
+            "CAR", "TRUCK", "BUS", "MOTORCYCLE", "TWO_WHEELER",
+            "SCOOTER", "AUTO_RICKSHAW", "VAN", "OTHER_VEHICLE", "VEHICLE"
+        )
+
+        h_res = det.get("hierarchical_result")
 
         if is_vehicle:
             color_name, color_hex, color_conf = cls.extract_color(crop, fallback_seed=seed_key)
-            structure = cls.classify_structure(obj_class, bbox, fallback_seed=seed_key)
-            make, model = cls.estimate_make_model(structure, fallback_seed=seed_key)
+            
+            # Prefer hierarchical result from specialized classifiers if available
+            if h_res and h_res.subtype:
+                structure = h_res.subtype
+            else:
+                structure = cls.classify_structure(obj_class, bbox, fallback_seed=seed_key)
+
+            if h_res and h_res.make and h_res.model:
+                make, model = h_res.make, h_res.model
+                status_str = h_res.classification_status.value
+            elif h_res and h_res.classification_status.value in ("UNCERTAIN", "UNKNOWN"):
+                make, model = None, None
+                status_str = h_res.classification_status.value
+            else:
+                make, model = cls.estimate_make_model(structure, fallback_seed=seed_key)
+                status_str = "LIKELY"
+
             plate_num, plate_conf = cls.generate_or_normalize_plate(fallback_seed=seed_key)
+
+            disp_name = f"{make} {model}".strip() if (make and model) else f"{structure}".replace("_", " ").title()
 
             det["attributes"] = {
                 "is_vehicle": True,
                 "structure_type": structure,
                 "make": make,
                 "model": model,
-                "display_name": f"{make} {model}",
+                "display_name": disp_name,
+                "classification_status": status_str,
                 "color": color_name,
                 "color_hex": color_hex,
                 "color_confidence": color_conf,

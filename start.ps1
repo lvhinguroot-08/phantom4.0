@@ -29,14 +29,22 @@ if (-not $backendRunning) {
     if (Test-Path "backend\.venv\Scripts\python.exe") {
         $pythonExe = (Resolve-Path "backend\.venv\Scripts\python.exe").Path
     }
-    Start-Process -FilePath $pythonExe -ArgumentList "-m uvicorn app.main:app --host 0.0.0.0 --port 8000" -WorkingDirectory "backend" -WindowStyle Hidden
+    Start-Process -FilePath $pythonExe -ArgumentList "-m uvicorn app.main:app --host 0.0.0.0 --port 8000" -WorkingDirectory "backend"
 }
 
-# Start frontend preview/dev
-$npmCmd = Get-Command npm -ErrorAction SilentlyContinue
-if ($npmCmd) {
-    Write-Host "  [+] Starting frontend command center on port 3000..." -ForegroundColor Green
-    Start-Process -FilePath "npm" -ArgumentList "run preview -- --port 3000 --host 0.0.0.0" -WorkingDirectory "frontend" -WindowStyle Hidden
+# Start frontend dev server if not running
+$frontendRunning = $false
+try {
+    $fr = Invoke-WebRequest -Uri "http://localhost:3000" -Method Get -TimeoutSec 1 -ErrorAction SilentlyContinue
+    if ($fr -and $fr.StatusCode -eq 200) { $frontendRunning = $true }
+} catch {}
+
+if (-not $frontendRunning) {
+    $npmCmd = Get-Command npm -ErrorAction SilentlyContinue
+    if ($npmCmd) {
+        Write-Host "  [+] Starting frontend command center on port 3000..." -ForegroundColor Green
+        Start-Process -FilePath "cmd.exe" -ArgumentList "/c npm run dev" -WorkingDirectory "frontend"
+    }
 }
 
 Write-Host ""

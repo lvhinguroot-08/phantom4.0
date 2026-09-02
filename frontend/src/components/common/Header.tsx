@@ -1,14 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
-  Activity,
-  Database,
   Search,
   Bell,
   LogOut,
   Shield,
   Clock,
-  Radio,
-  Server,
   Volume2,
   VolumeX,
   Sun,
@@ -16,37 +12,50 @@ import {
   Menu,
   X,
   Cpu,
+  Radio,
+  ChevronDown,
+  Settings as SettingsIcon,
+  Activity,
+  Bot,
 } from 'lucide-react';
-import { useBackendStatus } from '../../context/BackendStatusContext';
 import { useAuth } from '../../context/AuthContext';
 import { useRealtimeEvents } from '../../context/RealtimeEventContext';
 import { useTheme } from '../../context/ThemeContext';
 import { NotificationCenter } from './NotificationCenter';
 import { ForensicAIModal } from './ForensicAIModal';
+import { GlobalSearchModal } from './GlobalSearchModal';
+import { Logo } from './Logo';
+import { NavView } from './Sidebar';
+import { Camera } from '../../types';
 
 interface HeaderProps {
   onSearch?: (query: string) => void;
+  onNavigate?: (view: NavView) => void;
+  onSelectCamera?: (camera: Camera) => void;
   activeAlertCount?: number;
   isMobileMenuOpen?: boolean;
   onToggleMobileMenu?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
-  onSearch,
+  onNavigate = () => {},
+  onSelectCamera,
   activeAlertCount = 0,
   isMobileMenuOpen = false,
   onToggleMobileMenu,
 }) => {
   const { theme, toggleTheme } = useTheme();
-  const { isConnected, isDbReady, readiness, latencyMs, systemInfo } = useBackendStatus();
-  const { connectionStatus, unreadCount, isSoundEnabled, toggleSound } = useRealtimeEvents();
+  const { unreadCount, isSoundEnabled, toggleSound } = useRealtimeEvents();
   const { user, operationalMode, logout } = useAuth();
   const [utcTime, setUtcTime] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isNotifOpen, setIsNotifOpen] = useState<boolean>(false);
   const [isForensicModalOpen, setIsForensicModalOpen] = useState<boolean>(false);
-  const [isSearchOpenMobile, setIsSearchOpenMobile] = useState<boolean>(false);
+  const [isSearchModalOpen, setIsSearchModalOpen] = useState<boolean>(false);
+  const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState<boolean>(false);
+  const profileDropdownRef = useRef<HTMLDivElement>(null);
 
+  // UTC Precision Clock
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
@@ -57,118 +66,99 @@ export const Header: React.FC<HeaderProps> = ({
     return () => clearInterval(timer);
   }, []);
 
-  const handleSearchSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (onSearch) onSearch(searchQuery);
-    setIsSearchOpenMobile(false);
-  };
+  // Global Ctrl+K / Cmd+K listener
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsSearchModalOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Click outside to close profile dropdown
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        profileDropdownRef.current &&
+        !profileDropdownRef.current.contains(event.target as Node)
+      ) {
+        setIsProfileDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   return (
     <>
       <header className="top-command-bar" role="banner">
-        {/* Left: Hamburger (Mobile), Brand, Mode */}
+        {/* Left: Hamburger (Mobile) + Custom PHANTOM Brand Logo */}
         <div className="brand-section">
           {onToggleMobileMenu && (
             <button
               onClick={onToggleMobileMenu}
-              className="mobile-nav-toggle-btn"
+              className="mobile-nav-toggle-btn icon-btn"
               aria-label={isMobileMenuOpen ? 'Close Navigation Menu' : 'Open Navigation Menu'}
               title="Toggle Menu"
             >
-              {isMobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
+              {isMobileMenuOpen ? <X size={18} /> : <Menu size={18} />}
             </button>
           )}
 
-          <div className="logo-badge">
-            <Radio className="logo-icon animate-pulse" size={20} />
-            <div className="logo-text">
-              <span className="logo-title">PHANTOM</span>
-              <span className="logo-sub">STATEWIDE CCTV INTEL</span>
-            </div>
+          <div
+            className="logo-badge cursor-pointer"
+            onClick={() => onNavigate('dashboard')}
+            title="Return to Dashboard"
+            style={{ cursor: 'pointer' }}
+          >
+            <Logo size="md" />
           </div>
 
           <div className="op-mode-tag hide-on-mobile">
-            <Shield size={12} className="text-cyan" />
+            <Shield size={12} style={{ color: 'var(--accent-purple)' }} />
             <span className="mode-label">MODE:</span>
             <span className="mode-val">{operationalMode}</span>
           </div>
         </div>
 
-        {/* Center: Telemetry (Responsive - hides detailed stats on small screens) */}
+        {/* Center: UTC Clock & Live 30 Feeds Indicator */}
         <div className="telemetry-section hide-on-tablet">
-          {/* UTC Precision Time */}
           <div className="clock-badge" title="Coordinated Universal Time">
-            <Clock size={13} className="text-cyan" />
+            <Clock size={13} style={{ color: 'var(--accent-purple)' }} />
             <span className="clock-text">{utcTime || 'UTC SYNCHRONIZING...'}</span>
           </div>
 
-          {/* Real-time WebSocket Status */}
-          <div
-            className={`status-pill ${
-              connectionStatus === 'CONNECTED'
-                ? 'status-online'
-                : connectionStatus === 'RECONNECTING'
-                ? 'status-warning'
-                : 'status-offline'
-            }`}
-            title="Real-Time Event WebSocket Feed"
-          >
-            <Radio size={13} className={connectionStatus === 'CONNECTED' ? 'animate-pulse text-emerald-400' : ''} />
+          <div className="status-pill status-online" title="All 30 Sentinel Feeds Transmitting">
+            <Radio size={13} className="animate-pulse" style={{ color: 'var(--accent-healthy)' }} />
             <div className="pill-meta">
-              <span className="pill-title">
-                {connectionStatus === 'CONNECTED'
-                  ? 'LIVE WEBSOCKET'
-                  : connectionStatus === 'RECONNECTING'
-                  ? 'RECONNECTING WS'
-                  : 'WS OFFLINE'}
-              </span>
-              <span className="pill-sub">
-                {connectionStatus === 'CONNECTED' ? 'REAL-TIME STREAM' : 'POLLING BACKEND'}
-              </span>
-            </div>
-          </div>
-
-          {/* Backend API Connection Status */}
-          <div className={`status-pill ${isConnected ? 'status-online' : 'status-offline'}`}>
-            <Server size={13} />
-            <div className="pill-meta">
-              <span className="pill-title">
-                {isConnected ? `API ONLINE (v${systemInfo?.version || '4.8'})` : 'API OFFLINE'}
-              </span>
-              <span className="pill-sub">
-                {isConnected && latencyMs !== null ? `${latencyMs}ms LATENCY` : 'BACKEND OFFLINE'}
-              </span>
-            </div>
-          </div>
-
-          {/* Database PostGIS Readiness Status */}
-          <div className={`status-pill ${isDbReady ? 'status-db-ready' : 'status-offline'}`}>
-            <Database size={13} />
-            <div className="pill-meta">
-              <span className="pill-title">
-                {isDbReady ? (readiness?.database?.mode === 'STANDALONE_LOCAL' ? 'DATA AVAILABLE' : 'POSTGIS READY') : 'DATA UNAVAILABLE'}
-              </span>
-              <span className="pill-sub">
-                {isDbReady ? (readiness?.database?.mode === 'STANDALONE_LOCAL' ? 'LOCAL / IN-MEMORY' : 'SPATIAL INDEXED') : 'DB DISCONNECTED'}
-              </span>
+              <span className="pill-title">30/30 CCTV FEEDS</span>
+              <span className="pill-sub">STATEWIDE GRID LIVE</span>
             </div>
           </div>
         </div>
 
-        {/* Right: Theme Toggle, Search, Forensic AI Modal, Sound, Notifications & Operator Profile */}
+        {/* Right: Search, Forensic AI, Sound, Notifications, Theme, User Profile */}
         <div className="actions-section">
-          {/* Global Search Box (Desktop/Laptop) */}
-          <form onSubmit={handleSearchSubmit} className="global-search-box hide-on-mobile">
+          {/* Global Search Input Box */}
+          <div
+            onClick={() => setIsSearchModalOpen(true)}
+            className="global-search-box hide-on-mobile"
+            style={{ cursor: 'pointer' }}
+            title="Open Global Surveillance Search (Ctrl+K)"
+          >
             <Search size={14} className="search-icon" />
             <input
               type="text"
-              placeholder="Search cameras, plates, incidents (Ctrl+K)..."
+              readOnly
+              placeholder="Search cameras, plates, incidents..."
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              aria-label="Global Surveillance Search"
+              style={{ cursor: 'pointer' }}
             />
             <kbd className="search-kbd">Ctrl+K</kbd>
-          </form>
+          </div>
 
           {/* Forensic AI Inspector Button */}
           <button
@@ -178,32 +168,35 @@ export const Header: React.FC<HeaderProps> = ({
               display: 'flex',
               alignItems: 'center',
               gap: '6px',
-              backgroundColor: 'rgba(56, 189, 248, 0.15)',
-              border: '1px solid #38bdf8',
-              color: '#38bdf8',
+              backgroundColor: 'var(--accent-purple-dim)',
+              border: '1px solid var(--border-medium)',
+              color: 'var(--accent-purple)',
               padding: '6px 12px',
-              borderRadius: '6px',
-              fontWeight: 600,
-              fontSize: '12px',
+              borderRadius: 'var(--radius-sm)',
+              fontWeight: 800,
+              fontSize: '11px',
+              fontFamily: 'var(--font-mono)',
               cursor: 'pointer',
+              width: 'auto',
             }}
-            title="Open YOLO26 Forensic AI Inspector (Image & Video Analysis)"
+            title="Open YOLO26 Forensic AI Inspector"
           >
-            <Cpu size={14} className="text-cyan animate-pulse" />
+            <Cpu size={14} className="animate-pulse" style={{ color: 'var(--accent-purple)' }} />
             <span className="hide-on-mobile">FORENSIC AI</span>
           </button>
 
-          {/* Mobile Search Button */}
+          {/* Tactical Sound Toggle */}
           <button
-            onClick={() => setIsSearchOpenMobile(!isSearchOpenMobile)}
-            className="icon-btn show-on-mobile"
-            title="Search"
-            aria-label="Search"
+            onClick={toggleSound}
+            className={`icon-btn hide-on-mobile ${isSoundEnabled ? 'text-purple' : 'text-muted'}`}
+            title={isSoundEnabled ? 'Sound Notifications ON' : 'Sound Notifications MUTED'}
+            aria-label="Toggle Sound Notifications"
+            style={{ color: isSoundEnabled ? 'var(--accent-purple)' : 'var(--text-muted)' }}
           >
-            <Search size={16} />
+            {isSoundEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />}
           </button>
 
-          {/* Theme Switcher: Light / Dark Mode */}
+          {/* Theme Switcher */}
           <button
             onClick={toggleTheme}
             className="icon-btn theme-toggle-btn"
@@ -211,27 +204,17 @@ export const Header: React.FC<HeaderProps> = ({
             aria-label="Toggle Theme Mode"
           >
             {theme === 'dark' ? (
-              <Sun size={17} className="theme-icon sun-icon text-amber-400" />
+              <Sun size={16} style={{ color: 'var(--accent-attention)' }} />
             ) : (
-              <Moon size={17} className="theme-icon moon-icon text-indigo-600" />
+              <Moon size={16} style={{ color: 'var(--accent-purple)' }} />
             )}
-          </button>
-
-          {/* Tactical Sound Toggle */}
-          <button
-            onClick={toggleSound}
-            className={`icon-btn hide-on-mobile ${isSoundEnabled ? 'text-cyan' : 'text-muted'}`}
-            title={isSoundEnabled ? 'Sound Notifications ON' : 'Sound Notifications MUTED'}
-            aria-label="Toggle Sound Notifications"
-          >
-            {isSoundEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />}
           </button>
 
           {/* Notification Center Trigger */}
           <button
             onClick={() => setIsNotifOpen(true)}
             className="icon-btn relative"
-            title="Real-Time Notification Drawer"
+            title="Threat Notification Center"
             aria-label="Notification Center"
           >
             <Bell size={16} />
@@ -242,51 +225,188 @@ export const Header: React.FC<HeaderProps> = ({
             )}
           </button>
 
-          {/* User Profile & RBAC */}
-          <div className="user-profile-badge">
-            <div className="user-avatar">{user.full_name.substring(0, 2).toUpperCase()}</div>
-            <div className="user-meta hide-on-mobile">
-              <span className="user-name">{user.full_name}</span>
-              <span className="user-role">{user.role}</span>
+          {/* Admin User Profile & Dropdown Menu */}
+          <div className="relative" ref={profileDropdownRef} style={{ position: 'relative' }}>
+            <div
+              className="user-profile-badge"
+              onClick={() => setIsProfileDropdownOpen((prev) => !prev)}
+              style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}
+              title="Operator Identity & Menu"
+            >
+              <div
+                className="user-avatar"
+                style={{
+                  background: 'linear-gradient(135deg, var(--accent-purple), var(--accent-blue))',
+                  boxShadow: '0 0 10px var(--phantom-purple-dim)',
+                  color: '#fff',
+                }}
+              >
+                {user.full_name.substring(0, 2).toUpperCase()}
+              </div>
+              <div className="user-meta hide-on-mobile">
+                <span className="user-name">{user.full_name}</span>
+                <span className="user-role" style={{ color: 'var(--accent-purple)' }}>{user.role}</span>
+              </div>
+              <ChevronDown
+                size={14}
+                style={{
+                  color: 'var(--text-muted)',
+                  transform: isProfileDropdownOpen ? 'rotate(180deg)' : 'none',
+                  transition: 'transform 0.2s ease',
+                }}
+              />
             </div>
-          </div>
 
-          {/* Logout Action */}
-          <button
-            onClick={logout}
-            className="icon-btn text-danger"
-            title="Lock / Logout Station"
-            aria-label="Logout"
-          >
-            <LogOut size={16} />
-          </button>
+            {/* Profile Dropdown Menu */}
+            {isProfileDropdownOpen && (
+              <div
+                style={{
+                  position: 'absolute',
+                  right: 0,
+                  top: '110%',
+                  width: '260px',
+                  background: 'var(--glass-bg)',
+                  backdropFilter: 'var(--glass-blur)',
+                  WebkitBackdropFilter: 'var(--glass-blur)',
+                  border: '1px solid var(--border-medium)',
+                  borderRadius: 'var(--radius-md)',
+                  boxShadow: 'var(--shadow-3d)',
+                  padding: '12px',
+                  zIndex: 100,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px',
+                }}
+              >
+                {/* User Identity Details */}
+                <div
+                  style={{
+                    padding: '8px 10px',
+                    background: 'var(--bg-tertiary)',
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1px solid var(--border-subtle)',
+                  }}
+                >
+                  <div style={{ fontWeight: 700, fontSize: '0.82rem', color: 'var(--text-primary)' }}>
+                    {user.full_name}
+                  </div>
+                  <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                    {user.department} • {user.badge_number}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: '0.65rem',
+                      color: 'var(--accent-purple)',
+                      fontWeight: 800,
+                      marginTop: '4px',
+                      fontFamily: 'var(--font-mono)',
+                    }}
+                  >
+                    ROLE: {user.role}
+                  </div>
+                </div>
+
+                {/* Dropdown Navigation Actions */}
+                <button
+                  onClick={() => {
+                    onNavigate('settings');
+                    setIsProfileDropdownOpen(false);
+                  }}
+                  className="icon-btn"
+                  style={{
+                    width: '100%',
+                    justifyContent: 'flex-start',
+                    gap: '10px',
+                    padding: '8px 10px',
+                    height: 'auto',
+                    fontSize: '0.78rem',
+                    color: 'var(--text-primary)',
+                  }}
+                >
+                  <SettingsIcon size={15} style={{ color: 'var(--accent-purple)' }} />
+                  <span>System Settings</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    onNavigate('system_health');
+                    setIsProfileDropdownOpen(false);
+                  }}
+                  className="icon-btn"
+                  style={{
+                    width: '100%',
+                    justifyContent: 'flex-start',
+                    gap: '10px',
+                    padding: '8px 10px',
+                    height: 'auto',
+                    fontSize: '0.78rem',
+                    color: 'var(--text-primary)',
+                  }}
+                >
+                  <Activity size={15} style={{ color: 'var(--accent-blue)' }} />
+                  <span>Stream & System Health</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    onNavigate('copilot');
+                    setIsProfileDropdownOpen(false);
+                  }}
+                  className="icon-btn"
+                  style={{
+                    width: '100%',
+                    justifyContent: 'flex-start',
+                    gap: '10px',
+                    padding: '8px 10px',
+                    height: 'auto',
+                    fontSize: '0.78rem',
+                    color: 'var(--text-primary)',
+                  }}
+                >
+                  <Bot size={15} style={{ color: 'var(--accent-healthy)' }} />
+                  <span>AI Copilot Console</span>
+                </button>
+
+                <div style={{ height: '1px', background: 'var(--border-subtle)', margin: '4px 0' }} />
+
+                {/* Logout Button */}
+                <button
+                  onClick={() => {
+                    setIsProfileDropdownOpen(false);
+                    logout();
+                  }}
+                  className="icon-btn"
+                  style={{
+                    width: '100%',
+                    justifyContent: 'flex-start',
+                    gap: '10px',
+                    padding: '8px 10px',
+                    height: 'auto',
+                    fontSize: '0.78rem',
+                    color: 'var(--accent-danger)',
+                    borderColor: 'rgba(239, 68, 68, 0.3)',
+                    background: 'rgba(239, 68, 68, 0.08)',
+                    fontWeight: 700,
+                  }}
+                >
+                  <LogOut size={15} />
+                  <span>Lock Station & Logout</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
-      {/* Mobile Search Overlay Input */}
-      {isSearchOpenMobile && (
-        <div className="mobile-search-bar">
-          <form onSubmit={handleSearchSubmit} className="mobile-search-form">
-            <Search size={16} className="search-icon" />
-            <input
-              type="text"
-              placeholder="Search cameras, plates, incidents..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              autoFocus
-            />
-            <button
-              type="button"
-              className="icon-btn"
-              onClick={() => setIsSearchOpenMobile(false)}
-            >
-              <X size={16} />
-            </button>
-          </form>
-        </div>
-      )}
+      {/* Global Spotlight Search Modal */}
+      <GlobalSearchModal
+        isOpen={isSearchModalOpen}
+        onClose={() => setIsSearchModalOpen(false)}
+        onNavigate={onNavigate}
+        onSelectCamera={onSelectCamera}
+      />
 
-      {/* Notification Center Drawer */}
+      {/* Real-Time Notification Center Drawer */}
       <NotificationCenter isOpen={isNotifOpen} onClose={() => setIsNotifOpen(false)} />
 
       {/* YOLO26 Forensic AI Inspector Modal */}

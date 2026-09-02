@@ -34,6 +34,70 @@ from app.schemas.common import ApiResponse
 router = APIRouter(prefix="/auth", tags=["Authentication & RBAC"])
 
 
+@router.get(
+    "/demo-token",
+    response_model=ApiResponse[TokenResponse],
+    status_code=status.HTTP_200_OK,
+    summary="Get Pre-Authenticated Development Demo JWT Token",
+)
+async def get_demo_token(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[TokenResponse]:
+    """Provides an instant valid JWT access token for development and UI evaluation."""
+    user = None
+    try:
+        if db is not None:
+            user = await user_repo.get_by_identifier(db, "admin_phantom")
+    except Exception:
+        user = None
+
+    user_id = str(user.id) if user else "30000000-0000-0000-0000-000000000001"
+    role_name = user.role.name if user and user.role else "SYSTEM_ADMIN"
+    dept_id = str(user.department_id) if user and user.department_id else "10000000-0000-0000-0000-000000000001"
+    dept_name = user.department.name if user and user.department else "Statewide Surveillance Command"
+
+    extra_claims = {
+        "role": role_name,
+        "department_id": dept_id,
+        "username": user.username if user else "admin_phantom",
+        "badge_number": user.badge_number if user else "ADM-001",
+    }
+    access_token = create_access_token(
+        subject=user_id,
+        extra_claims=extra_claims,
+    )
+    refresh_token_str = create_refresh_token(subject=user_id)
+    permissions = ["*"]
+
+    user_info = {
+        "id": user_id,
+        "username": user.username if user else "admin_phantom",
+        "email": user.email if user else "admin@phantom.gujarat.gov.in.demo",
+        "full_name": user.full_name if user else "Cmdr. Rajesh Patel",
+        "badge_number": user.badge_number if user else "ADM-001",
+        "phone_number": user.phone_number if user else "+91-9825000001",
+        "role": role_name,
+        "department_id": dept_id,
+        "department_name": dept_name,
+        "is_active": True,
+        "permissions": permissions,
+        "last_login_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    return ApiResponse(
+        success=True,
+        data=TokenResponse(
+            access_token=access_token,
+            refresh_token=refresh_token_str,
+            token_type="Bearer",
+            expires_in_seconds=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            user=user_info,
+        ),
+        request_id=getattr(request.state, "request_id", None),
+    )
+
+
 @router.post(
     "/login",
     response_model=ApiResponse[TokenResponse],

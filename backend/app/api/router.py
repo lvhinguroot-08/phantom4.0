@@ -25,6 +25,7 @@ from app.api.v1.endpoints import (
     investigations_router,
     evidence_router,
     audit_router,
+    copilot_router,
 )
 from app.api.v1.endpoints.image_detection import router as image_detection_router
 from app.api.v1.endpoints.video_detection import router as video_detection_router
@@ -39,6 +40,7 @@ api_v1_router = APIRouter()
 
 # Unified PHANTOM 2.0 AI Testing & Processing Endpoints (/upload, /yolo/detect, /anpr/recognize, /process, /results/{id})
 api_v1_router.include_router(unified_ai_router)
+api_v1_router.include_router(copilot_router)
 
 api_v1_router.include_router(system_health_router)
 api_v1_router.include_router(info_router)

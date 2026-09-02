@@ -292,6 +292,8 @@ class CameraStreamWorker:
                         "class_name": cls_name.lower(),
                         "confidence": conf,
                         "track_id": track_id,
+                        "classification_status": d.get("classification_status", "CONFIDENT"),
+                        "event_lifecycle": d.get("event_lifecycle", "CONFIRMED"),
                         "bbox": {
                             "x1": round(bx1, 1),
                             "y1": round(by1, 1),
@@ -314,6 +316,7 @@ class CameraStreamWorker:
                         "attributes": d.get("attributes", {}),
                         "is_watchlist_match": d.get("is_watchlist_match", False),
                         "threat_level": d.get("threat_level", "NORMAL"),
+                        "is_hard_negative": d.get("is_hard_negative", False),
                     })
 
                 cam_info: Dict[str, Any] = {}
@@ -327,7 +330,11 @@ class CameraStreamWorker:
 
                 persons_count = sum(1 for o in formatted_objects if o.get("class_name") == "person" or o.get("object_class") == "PERSON")
                 cars_count = sum(1 for o in formatted_objects if o.get("class_name") == "car" or o.get("object_class") == "CAR")
-                vehicles_count = sum(1 for o in formatted_objects if o.get("attributes", {}).get("is_vehicle") or o.get("object_class") in {"CAR", "TRUCK", "BUS", "MOTORCYCLE"})
+                vehicles_count = sum(
+                    1 for o in formatted_objects
+                    if o.get("attributes", {}).get("is_vehicle")
+                    or o.get("object_class") in {"CAR", "TRUCK", "BUS", "MOTORCYCLE", "TWO_WHEELER", "SCOOTER", "AUTO_RICKSHAW", "VAN", "OTHER_VEHICLE"}
+                )
                 plates_count = sum(1 for o in formatted_objects if o.get("attributes", {}).get("license_plate"))
 
                 summary_payload = {
