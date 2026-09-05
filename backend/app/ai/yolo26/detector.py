@@ -187,14 +187,10 @@ class YOLO26Detector:
             except Exception as inference_err:
                 logger.error(f"Inference error in detect_frame: {inference_err}")
 
-        # 4. Secondary Hierarchical Classification & Hard-Negative Filtering
+        # 4. Canonical Hierarchical Classification & Hard-Negative Filtering
         processed_list: List[Dict[str, Any]] = []
-        suppressed_indices = set()
 
         for i, det in enumerate(raw_results_list):
-            if i in suppressed_indices:
-                continue
-
             cname = det["class_name"].lower()
             canon = normalize_class_name(cname)
             bx = det["bbox"]
@@ -202,7 +198,7 @@ class YOLO26Detector:
             bh = bx["height"]
             conf = det["confidence"]
 
-            # Extract image crop with contextual padding
+            # Extract image crop with contextual padding if needed
             pad_x = int(bw * 0.08)
             pad_y = int(bh * 0.08)
             cx1 = max(0, bx["x1"] - pad_x)
@@ -211,125 +207,52 @@ class YOLO26Detector:
             cy2 = min(h, bx["y2"] + pad_y)
             crop = frame[cy1:cy2, cx1:cx2] if (cx2 > cx1 + 4 and cy2 > cy1 + 4) else None
 
-            # --- HARD NEGATIVE PERSON / POLE FILTERING ---
+            # --- HARD NEGATIVE POLE FILTERING (Pedestrian vs Streetlight) ---
+            # Note: Rider suppression has been REMOVED. Persons on motorcycles are fully preserved.
             if canon == "PERSON":
-                # Check for motorcycle rider fusion
-                has_moto_overlap = False
-                for j, other in enumerate(raw_results_list):
-                    if i != j and j not in suppressed_indices:
-                        if normalize_class_name(other["class_name"]) in ("MOTORCYCLE", "TWO_WHEELER", "SCOOTER", "BICYCLE"):
-                            obx = other["bbox"]
-                            ix1 = max(bx["x1"], obx["x1"])
-                            iy1 = max(bx["y1"], obx["y1"])
-                            ix2 = min(bx["x2"], obx["x2"])
-                            iy2 = min(bx["y2"], obx["y2"])
-                            if ix2 > ix1 and iy2 > iy1:
-                                inter_area = (ix2 - ix1) * (iy2 - iy1)
-                                o_area = max(1, obx["width"] * obx["height"])
-                                if inter_area / float(o_area) > 0.22 or inter_area / float(bw * bh) > 0.22:
-                                    has_moto_overlap = True
-                                    break
-                if has_moto_overlap:
-                    suppressed_indices.add(i)
-                    continue
+                if conf < 0.75:
+                    is_pole, reason = HardNegativePoleFilter.is_hard_negative_pole(crop, bx, detector_conf=conf)
+                    if is_pole:
+                        logger.debug(f"Hard-negative pole filtered: {reason}")
+                        continue
 
-                # Run Hard-Negative Pole / Streetlight Filter
-                is_pole, reason = HardNegativePoleFilter.is_hard_negative_pole(crop, bx, detector_conf=conf)
-                if is_pole:
-                    # Filter out pole false-positives
-                    logger.debug(f"Hard-negative pole filtered: {reason}")
-                    continue
+            status = ClassificationStatus.CONFIDENT if conf >= 0.75 else (
+                ClassificationStatus.LIKELY if conf >= 0.50 else ClassificationStatus.UNCERTAIN
+            )
 
-                h_res = HierarchicalClassificationResult(
-                    category="PERSON",
-                    category_confidence=conf,
-                    subtype="PEDESTRIAN",
-                    subtype_confidence=conf,
-                    classification_status=ClassificationStatus.CONFIDENT if conf >= 0.75 else ClassificationStatus.LIKELY,
-                    display_label=VisionTaxonomy.format_tactical_label("PERSON", confidence=conf, status=ClassificationStatus.CONFIDENT),
-                )
-                det["object_class"] = "PERSON"
-                det["hierarchical_result"] = h_res
-                processed_list.append(det)
+            tactical_label = VisionTaxonomy.format_tactical_label(
+                category=canon,
+                confidence=conf,
+                status=status,
+                track_id=track_id,
+            )
 
-            # --- TWO-WHEELER CLASSIFIER (SCOOTER vs MOTORCYCLE) ---
-            elif canon in ("TWO_WHEELER", "MOTORCYCLE", "SCOOTER"):
-                h_res = TwoWheelerSpecializedClassifier.classify_crop(
-                    crop_bgr=crop,
-                    bbox=bx,
-                    raw_conf=conf,
-                    track_id=track_id,
-                )
-                det["object_class"] = h_res.category
-                det["hierarchical_result"] = h_res
-                processed_list.append(det)
+            h_res = HierarchicalClassificationResult(
+                category=canon,
+                category_confidence=conf,
+                subtype=None,
+                subtype_confidence=None,
+                make=None,
+                model=None,
+                model_confidence=None,
+                classification_status=status,
+                display_label=tactical_label,
+            )
 
-            # --- CAR / HATCHBACK / WAGONR vs SWIFT CLASSIFIER ---
-            elif canon in ("CAR", "HATCHBACK", "SEDAN", "SUV"):
-                # Check for 3-wheeler auto-rickshaw misclassification
-                is_auto, auto_conf = AutoRickshawDisambiguator.is_auto_rickshaw(crop, bx, canon, conf)
-                if is_auto:
-                    h_res = HierarchicalClassificationResult(
-                        category="AUTO_RICKSHAW",
-                        category_confidence=auto_conf,
-                        subtype="AUTO_RICKSHAW",
-                        make="Bajaj",
-                        model="Compact Auto",
-                        model_confidence=auto_conf,
-                        classification_status=ClassificationStatus.CONFIDENT if auto_conf >= 0.75 else ClassificationStatus.LIKELY,
-                        display_label=VisionTaxonomy.format_tactical_label("AUTO_RICKSHAW", make="Bajaj", model="Compact Auto", confidence=auto_conf, status=ClassificationStatus.CONFIDENT),
-                    )
-                    det["object_class"] = "AUTO_RICKSHAW"
-                else:
-                    h_res = CarSpecializedClassifier.classify_crop(
-                        crop_bgr=crop,
-                        bbox=bx,
-                        raw_conf=conf,
-                        track_id=track_id,
-                    )
-                    det["object_class"] = "CAR"
+            det["object_class"] = canon
+            det["class_name"] = canon.lower()
+            det["hierarchical_result"] = h_res
+            det["display_label"] = tactical_label
+            processed_list.append(det)
 
-                det["hierarchical_result"] = h_res
-                processed_list.append(det)
-
-            # --- TRUCK / AUTO-RICKSHAW DISAMBIGUATION ---
-            elif canon in ("TRUCK", "VAN", "BUS", "OTHER_VEHICLE"):
-                is_auto, auto_conf = AutoRickshawDisambiguator.is_auto_rickshaw(crop, bx, canon, conf)
-                if is_auto:
-                    h_res = HierarchicalClassificationResult(
-                        category="AUTO_RICKSHAW",
-                        category_confidence=auto_conf,
-                        subtype="AUTO_RICKSHAW",
-                        make="Bajaj",
-                        model="Compact Auto",
-                        model_confidence=auto_conf,
-                        classification_status=ClassificationStatus.CONFIDENT if auto_conf >= 0.75 else ClassificationStatus.LIKELY,
-                        display_label=VisionTaxonomy.format_tactical_label("AUTO_RICKSHAW", make="Bajaj", model="Compact Auto", confidence=auto_conf, status=ClassificationStatus.CONFIDENT),
-                    )
-                    det["object_class"] = "AUTO_RICKSHAW"
-                else:
-                    h_res = HierarchicalClassificationResult(
-                        category=canon,
-                        category_confidence=conf,
-                        subtype=canon,
-                        classification_status=ClassificationStatus.CONFIDENT if conf >= 0.78 else ClassificationStatus.LIKELY,
-                        display_label=VisionTaxonomy.format_tactical_label(canon, confidence=conf, status=ClassificationStatus.CONFIDENT),
-                    )
-                    det["object_class"] = canon
-
-                det["hierarchical_result"] = h_res
-                processed_list.append(det)
-
+        for det in processed_list:
+            h_res = det.get("hierarchical_result")
+            if h_res and getattr(h_res, "display_label", None):
+                det["display_label"] = h_res.display_label
             else:
-                h_res = HierarchicalClassificationResult(
-                    category=canon,
-                    category_confidence=conf,
-                    classification_status=ClassificationStatus.CONFIDENT if conf >= 0.78 else ClassificationStatus.LIKELY,
-                    display_label=VisionTaxonomy.format_tactical_label(canon, confidence=conf, status=ClassificationStatus.CONFIDENT),
-                )
-                det["object_class"] = canon
-                det["hierarchical_result"] = h_res
-                processed_list.append(det)
+                cname = det.get("object_class", "OBJECT")
+                conf = det.get("confidence", 0.0)
+                det["display_label"] = f"{cname.capitalize()} ({int(round(conf * 100))}%)"
 
         return processed_list
 

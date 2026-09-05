@@ -77,17 +77,17 @@ class HierarchicalClassificationResult:
 class VisionTaxonomy:
     """Master Authoritative Class Taxonomy for PHANTOM AI Surveillance Platform."""
 
-    # Authoritative Level 1 Broad Classes
+    # Authoritative Canonical Classes (Phase 1)
     BROAD_CATEGORIES = {
-        "PERSON",
-        "TWO_WHEELER",
         "CAR",
         "AUTO_RICKSHAW",
+        "MOTORCYCLE",
+        "SCOOTER",
         "BUS",
         "TRUCK",
-        "VAN",
+        "LCV_TEMPO",
         "BICYCLE",
-        "OTHER_VEHICLE",
+        "PERSON",
         "LICENSE_PLATE",
     }
 

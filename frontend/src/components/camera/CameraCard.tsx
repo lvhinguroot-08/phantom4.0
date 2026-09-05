@@ -122,9 +122,9 @@ export const CameraCard: React.FC<CameraCardProps> = ({
         <CameraPlayer
           camera={camera}
           streamUrl={primaryStream?.stream_url}
-          protocol={primaryStream?.protocol || 'WEBRTC'}
+          protocol={primaryStream?.protocol || 'HLS'}
           status={camera.status}
-          fps={camera.fps || 25}
+          fps={camera.fps || 30}
           quality={camera.status === 'ONLINE' ? 'EXCELLENT' : 'OFFLINE'}
           isAiOverlayEnabled={isAiOverlayEnabled}
         />
@@ -164,9 +164,15 @@ export const CameraCard: React.FC<CameraCardProps> = ({
           >
             {camera.camera_type || 'ANPR'}
           </span>
-          <span style={{ color: 'var(--accent-healthy)', fontWeight: 800 }}>
-            1080p • 25 FPS
-          </span>
+          {camera.status === 'ONLINE' ? (
+            <span style={{ color: 'var(--accent-healthy)', fontWeight: 800 }}>
+              1080p • {camera.fps || 25} FPS
+            </span>
+          ) : (
+            <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>
+              {camera.status}
+            </span>
+          )}
         </div>
       </div>
     </div>

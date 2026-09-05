@@ -1,0 +1,179 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 820" width="100%" height="100%" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+  
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0E0522" />
+      <stop offset="50%" stop-color="#14092E" />
+      <stop offset="100%" stop-color="#080316" />
+    </linearGradient>
+    <linearGradient id="cardGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1A0D3B" />
+      <stop offset="100%" stop-color="#100624" />
+    </linearGradient>
+    <linearGradient id="headerGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#7C3AED" />
+      <stop offset="100%" stop-color="#4C1D95" />
+    </linearGradient>
+    <linearGradient id="purpleGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#A855F7" />
+      <stop offset="100%" stop-color="#6B21A8" />
+    </linearGradient>
+    <linearGradient id="cyanGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#06B6D4" />
+      <stop offset="100%" stop-color="#0284C7" />
+    </linearGradient>
+    <linearGradient id="greenGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#10B981" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+    <linearGradient id="redGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#EF4444" />
+      <stop offset="100%" stop-color="#B91C1C" />
+    </linearGradient>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="115%">
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000000" flood-opacity="0.65" />
+    </filter>
+    <filter id="subtleGlow" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur stdDeviation="3" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+    <marker id="arr" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#C084FC" />
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#10B981" />
+    </marker>
+    <marker id="arr-cyan" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#06B6D4" />
+    </marker>
+    <marker id="arr-red" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#EF4444" />
+    </marker>
+  </defs>
+
+  <!-- Base Background -->
+  <rect width="860" height="820" fill="url(#bgGrad)" rx="8" />
+  
+  <!-- Precision Technical Grid -->
+  <g opacity="0.03" stroke="#A855F7" stroke-width="1">
+    <line x1="0" y1="0" x2="0" y2="820" /><line x1="40" y1="0" x2="40" y2="820" /><line x1="80" y1="0" x2="80" y2="820" /><line x1="120" y1="0" x2="120" y2="820" /><line x1="160" y1="0" x2="160" y2="820" /><line x1="200" y1="0" x2="200" y2="820" /><line x1="240" y1="0" x2="240" y2="820" /><line x1="280" y1="0" x2="280" y2="820" /><line x1="320" y1="0" x2="320" y2="820" /><line x1="360" y1="0" x2="360" y2="820" /><line x1="400" y1="0" x2="400" y2="820" /><line x1="440" y1="0" x2="440" y2="820" /><line x1="480" y1="0" x2="480" y2="820" /><line x1="520" y1="0" x2="520" y2="820" /><line x1="560" y1="0" x2="560" y2="820" /><line x1="600" y1="0" x2="600" y2="820" /><line x1="640" y1="0" x2="640" y2="820" /><line x1="680" y1="0" x2="680" y2="820" /><line x1="720" y1="0" x2="720" y2="820" /><line x1="760" y1="0" x2="760" y2="820" /><line x1="800" y1="0" x2="800" y2="820" /><line x1="840" y1="0" x2="840" y2="820" />
+    <line x1="0" y1="0" x2="860" y2="0" /><line x1="0" y1="40" x2="860" y2="40" /><line x1="0" y1="80" x2="860" y2="80" /><line x1="0" y1="120" x2="860" y2="120" /><line x1="0" y1="160" x2="860" y2="160" /><line x1="0" y1="200" x2="860" y2="200" /><line x1="0" y1="240" x2="860" y2="240" /><line x1="0" y1="280" x2="860" y2="280" /><line x1="0" y1="320" x2="860" y2="320" /><line x1="0" y1="360" x2="860" y2="360" /><line x1="0" y1="400" x2="860" y2="400" /><line x1="0" y1="440" x2="860" y2="440" /><line x1="0" y1="480" x2="860" y2="480" /><line x1="0" y1="520" x2="860" y2="520" /><line x1="0" y1="560" x2="860" y2="560" /><line x1="0" y1="600" x2="860" y2="600" /><line x1="0" y1="640" x2="860" y2="640" /><line x1="0" y1="680" x2="860" y2="680" /><line x1="0" y1="720" x2="860" y2="720" /><line x1="0" y1="760" x2="860" y2="760" /><line x1="0" y1="800" x2="860" y2="800" />
+  </g>
+  <rect width="860" height="820" fill="none" stroke="#6D28D9" stroke-width="1.5" rx="8" />
+  
+  <!-- Diagram Content -->
+  
+    <!-- Part 1: Event Streaming Fabric -->
+    <g transform="translate(30, 20)" filter="url(#shadow)">
+      <rect width="800" height="235" rx="8" fill="url(#cardGrad)" stroke="#C084FC" stroke-width="1.8" />
+      <rect x="0" y="0" width="800" height="34" rx="8" fill="#1E0E45" />
+      <text x="20" y="23" fill="#C084FC" font-size="13" font-weight="800">1. ASYNCHRONOUS EVENT STREAMING &amp; PUBSUB BROADCASTER</text>
+      
+      <!-- EventPublisher Box -->
+      <g transform="translate(20, 48)">
+        <rect width="230" height="165" rx="6" fill="#080316" stroke="#6D28D9" stroke-width="1" />
+        <text x="14" y="22" fill="#FFFFFF" font-size="11" font-weight="700">EventPublisher Engine</text>
+        <text x="14" y="40" fill="#C4B5FD" font-size="9">• Singleton async dispatcher</text>
+        <text x="14" y="56" fill="#C4B5FD" font-size="9">• Zero thread contention</text>
+        <text x="14" y="72" fill="#C4B5FD" font-size="9">• Emits detection envelopes</text>
+        <text x="14" y="88" fill="#C4B5FD" font-size="9">• Non-blocking background worker</text>
+        <text x="14" y="112" fill="#06B6D4" font-size="9" font-weight="700">Dispatch latency: &lt; 0.4ms</text>
+        <text x="14" y="130" fill="#FFFFFF" font-size="8.5">Bypasses DB on raw telemetry</text>
+      </g>
+      
+      <path d="M 250 130 L 290 130" stroke="#C084FC" stroke-width="2.5" marker-end="url(#arr)" />
+      
+      <!-- Kafka Topics -->
+      <g transform="translate(290, 48)">
+        <rect width="250" height="165" rx="6" fill="#080316" stroke="#06B6D4" stroke-width="1.5" />
+        <text x="14" y="22" fill="#06B6D4" font-size="11" font-weight="700">Apache Kafka Topics</text>
+        
+        <rect x="10" y="32" width="230" height="32" rx="4" fill="#130826" stroke="#6D28D9" stroke-width="1" />
+        <text x="18" y="52" fill="#FFFFFF" font-size="9.5" font-family="monospace">cctv.detections (High vol)</text>
+        
+        <rect x="10" y="70" width="230" height="32" rx="4" fill="#130826" stroke="#EF4444" stroke-width="1" />
+        <text x="18" y="90" fill="#EF4444" font-size="9.5" font-family="monospace">cctv.alerts (Priority 0)</text>
+        
+        <rect x="10" y="108" width="230" height="32" rx="4" fill="#130826" stroke="#6D28D9" stroke-width="1" />
+        <text x="18" y="128" fill="#C4B5FD" font-size="9.5" font-family="monospace">cctv.telemetry (5s pings)</text>
+        
+        <text x="14" y="156" fill="#10B981" font-size="8.5">Partitioned by camera_district</text>
+      </g>
+      
+      <path d="M 540 130 L 580 130" stroke="#10B981" stroke-width="2.5" marker-end="url(#arr-green)" />
+      
+      <!-- Redis + WebSocket -->
+      <g transform="translate(580, 48)">
+        <rect width="200" height="165" rx="6" fill="#080316" stroke="#10B981" stroke-width="1" />
+        <text x="14" y="22" fill="#10B981" font-size="11" font-weight="700">WebSocket Multiplexer</text>
+        <text x="14" y="40" fill="#FFFFFF" font-size="9">• FastAPI WebSocket endpoint</text>
+        <text x="14" y="56" fill="#FFFFFF" font-size="9">• Channel multiplexing</text>
+        <text x="14" y="72" fill="#C4B5FD" font-size="8.5">• Client room subscription</text>
+        <text x="14" y="88" fill="#C4B5FD" font-size="8.5">• 25-30 FPS bounding boxes</text>
+        <text x="14" y="112" fill="#06B6D4" font-size="9" font-weight="700">Redis Hot Cache sync</text>
+        <text x="14" y="130" fill="#C4B5FD" font-size="8.5">Sub-5ms browser delivery</text>
+      </g>
+    </g>
+    
+    <path d="M 430 255 L 430 285" stroke="#9333EA" stroke-width="2.5" marker-end="url(#arr)" />
+    
+    <!-- Part 2: React 18 Frontend State Synchronization -->
+    <g transform="translate(30, 285)" filter="url(#shadow)">
+      <rect width="800" height="475" rx="8" fill="url(#cardGrad)" stroke="#9333EA" stroke-width="2" />
+      <rect x="0" y="0" width="800" height="34" rx="8" fill="#1A0D3D" />
+      <text x="20" y="23" fill="#FFFFFF" font-size="13" font-weight="800">2. FRONTEND CLIENT STATE ARCHITECTURE (REACT 18 + ZUSTAND + TANSTACK QUERY)</text>
+      
+      <!-- 4 Frontend Stores -->
+      <g transform="translate(20, 50)">
+        <rect width="365" height="190" rx="6" fill="#080316" stroke="#6D28D9" stroke-width="1" />
+        <text x="16" y="24" fill="#06B6D4" font-size="11.5" font-weight="800">useCameraStore (Zustand)</text>
+        <text x="16" y="44" fill="#C4B5FD" font-size="9.5">• Active camera inventory &amp; filter states</text>
+        <text x="16" y="60" fill="#C4B5FD" font-size="9.5">• Selected stream resolutions &amp; WHEP URLs</text>
+        <text x="16" y="76" fill="#C4B5FD" font-size="9.5">• Grid layout presets: 1x1, 2x2, 3x3, 4x4 wall</text>
+        <text x="16" y="92" fill="#C4B5FD" font-size="9.5">• Camera status: ONLINE, OFFLINE, DEGRADED</text>
+        <rect x="14" y="110" width="337" height="65" rx="4" fill="#130826" stroke="#2B1050" stroke-width="1" />
+        <text x="22" y="130" fill="#FFFFFF" font-size="9" font-weight="700">Live WebRTC Canvas HUD Sync:</text>
+        <text x="22" y="146" fill="#10B981" font-size="8.5">• Coordinates overlays without DOM re-renders</text>
+        <text x="22" y="160" fill="#06B6D4" font-size="8.5">• Smooth bounding box interpolation @ 60 FPS</text>
+      </g>
+      
+      <g transform="translate(415, 50)">
+        <rect width="365" height="190" rx="6" fill="#080316" stroke="#EF4444" stroke-width="1" />
+        <text x="16" y="24" fill="#EF4444" font-size="11.5" font-weight="800">useAlertStore (Zustand)</text>
+        <text x="16" y="44" fill="#C4B5FD" font-size="9.5">• Real-time incoming threat queue</text>
+        <text x="16" y="60" fill="#C4B5FD" font-size="9.5">• Sound synthesizer alarm dispatch (Web Audio API)</text>
+        <text x="16" y="76" fill="#C4B5FD" font-size="9.5">• Severity filtering: CRITICAL, HIGH, MEDIUM, LOW</text>
+        <text x="16" y="92" fill="#C4B5FD" font-size="9.5">• Deduplication tracker in client session</text>
+        <rect x="14" y="110" width="337" height="65" rx="4" fill="#130826" stroke="#501020" stroke-width="1" />
+        <text x="22" y="130" fill="#FFFFFF" font-size="9" font-weight="700">One-Click Threat Escalation:</text>
+        <text x="22" y="146" fill="#EF4444" font-size="8.5">• Instantly dispatches PCR vehicle to junction</text>
+        <text x="22" y="160" fill="#F59E0B" font-size="8.5">• Spawns incident modal with pre-populated evidence</text>
+      </g>
+      
+      <g transform="translate(20, 255)">
+        <rect width="365" height="195" rx="6" fill="#080316" stroke="#10B981" stroke-width="1" />
+        <text x="16" y="24" fill="#10B981" font-size="11.5" font-weight="800">GIS &amp; Leaflet Overlays Engine</text>
+        <text x="16" y="44" fill="#C4B5FD" font-size="9.5">• Renders 80,000 camera pins via Canvas markers</text>
+        <text x="16" y="60" fill="#C4B5FD" font-size="9.5">• Dynamic FOV wedge polygon rendering</text>
+        <text x="16" y="76" fill="#C4B5FD" font-size="9.5">• Multi-camera vehicle trajectory polyline</text>
+        <text x="16" y="92" fill="#C4B5FD" font-size="9.5">• District boundary GeoJSON layer toggles</text>
+        <rect x="14" y="112" width="337" height="65" rx="4" fill="#130826" stroke="#104020" stroke-width="1" />
+        <text x="22" y="132" fill="#FFFFFF" font-size="9" font-weight="700">Zero Map Stutter Optimization:</text>
+        <text x="22" y="148" fill="#10B981" font-size="8.5">• Spatial clustering over zoom levels 8 to 18</text>
+        <text x="22" y="162" fill="#06B6D4" font-size="8.5">• Viewport bounding box culling</text>
+      </g>
+      
+      <g transform="translate(415, 255)">
+        <rect width="365" height="195" rx="6" fill="#080316" stroke="#C084FC" stroke-width="1" />
+        <text x="16" y="24" fill="#C084FC" font-size="11.5" font-weight="800">AICopilotDrawer &amp; Tool Orchestrator</text>
+        <text x="16" y="44" fill="#C4B5FD" font-size="9.5">• Sliding conversational drawer (EN, HI, GU)</text>
+        <text x="16" y="60" fill="#C4B5FD" font-size="9.5">• Markdown &amp; structured card message rendering</text>
+        <text x="16" y="76" fill="#C4B5FD" font-size="9.5">• Direct tool execution preview &amp; confirm</text>
+        <text x="16" y="92" fill="#C4B5FD" font-size="9.5">• Interactive map panning triggered by LLM responses</text>
+        <rect x="14" y="112" width="337" height="65" rx="4" fill="#130826" stroke="#3D1565" stroke-width="1" />
+        <text x="22" y="132" fill="#FFFFFF" font-size="9" font-weight="700">40+ Grounded Tools Integration:</text>
+        <text x="22" y="148" fill="#C084FC" font-size="8.5">• Fast query resolution without hallucinations</text>
+        <text x="22" y="162" fill="#06B6D4" font-size="8.5">• Section 65B certified PDF export on demand</text>
+      </g>
+    </g>
+</svg>

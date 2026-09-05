@@ -484,8 +484,9 @@ export const AICopilotPage: React.FC<AICopilotPageProps> = ({ onNavigate }) => {
                       <div style={{ aspectRatio: '16/9', background: '#000', position: 'relative' }}>
                         <CameraPlayer
                           camera={mapToCameraType(msg.openedCamera)}
+                          protocol="HLS"
                           status={msg.openedCamera.status as any}
-                          fps={msg.openedCamera.fps || 25}
+                          fps={msg.openedCamera.fps || 30}
                           quality="EXCELLENT"
                           isAiOverlayEnabled={Boolean(msg.detectionSummary)}
                         />

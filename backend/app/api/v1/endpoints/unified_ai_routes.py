@@ -10,6 +10,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import re
 import shutil
 import tempfile
 from typing import Any, Dict, List, Optional
@@ -354,8 +355,68 @@ async def direct_anpr_recognize(
 
 
 # ------------------------------------------------------------------------------
-# 4. Unified Start Processing Endpoint
+# 4. Live Stream 10-15s Direct Capture & Unified Start Processing Endpoint
 # ------------------------------------------------------------------------------
+async def capture_live_stream_clip(camera_id: str, num_segments: int = 2) -> Optional[str]:
+    """
+    Directly captures 10-15 seconds of real live CCTV footage from the Sentinel camera stream.
+    Fetches real encrypted MPEG-TS segments, decrypts them via AES-128 key,
+    and combines them into a seamless playable .ts video clip ready for instant YOLO+ANPR inference.
+    """
+    try:
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+        from cryptography.hazmat.backends import default_backend
+        from app.services.stream_gateway_service import stream_gateway_service
+
+        raw_id = str(camera_id).strip().lower()
+        m = re.search(r"(cam\d+)", raw_id)
+        if m:
+            clean_id = m.group(1)
+        elif raw_id.isdigit():
+            clean_id = f"cam{int(raw_id):02d}"
+        else:
+            clean_id = "cam01"
+
+        manifest_text, _ = await stream_gateway_service.get_hls_manifest(clean_id)
+        key_bytes, _ = await stream_gateway_service.get_hls_key(clean_id)
+
+        if not manifest_text or not key_bytes or len(key_bytes) != 16:
+            logger.warning(f"Failed to fetch valid manifest/AES key for live capture of {clean_id}")
+            return None
+
+        lines = manifest_text.splitlines()
+        segs = [l.strip().split('/')[-1] for l in lines if l.strip().endswith('.ts')]
+        if not segs:
+            return None
+
+        chosen = segs[:num_segments] if len(segs) >= num_segments else segs[:1]
+
+        combined_ts = bytearray()
+        iv = b'\x00' * 16
+        for sname in chosen:
+            raw_seg, _ = await stream_gateway_service.get_hls_segment(clean_id, sname)
+            if raw_seg and len(raw_seg) > 0:
+                cipher = Cipher(algorithms.AES(key_bytes), modes.CBC(iv), backend=default_backend())
+                dec = cipher.decryptor()
+                plain = dec.update(raw_seg) + dec.finalize()
+                combined_ts.extend(plain)
+
+        if len(combined_ts) > 10000:
+            out_clip = UPLOAD_TEMP_DIR / f"{uuid.uuid4()}_{clean_id}_live_15s.ts"
+            out_clip.write_bytes(combined_ts)
+            cap = cv2.VideoCapture(str(out_clip))
+            if cap.isOpened():
+                ret, _ = cap.read()
+                cap.release()
+                if ret:
+                    logger.info(f"Captured {len(chosen)} segments (~12-15s) of live {clean_id} footage: {out_clip}")
+                    return str(out_clip)
+    except Exception as ex:
+        logger.warning(f"Error capturing live stream clip for {camera_id}: {ex}")
+
+    return None
+
+
 @router.post(
     "/process",
     response_model=ProcessJobResponse,
@@ -363,7 +424,7 @@ async def direct_anpr_recognize(
     summary="Start unified video AI processing (YOLO, ANPR, or YOLO+ANPR)",
 )
 async def start_video_processing(
-    file: Optional[UploadFile] = File(None, description="Direct video upload"),
+    file: Optional[UploadFile] = File(None, description="Direct video or image upload"),
     upload_id: Optional[str] = Form(None, description="Pre-uploaded video ID or Camera ID"),
     mode: str = Form("yolo_anpr", description="Processing mode: yolo, anpr, yolo_anpr"),
     sample_fps: float = Form(4.0, description="Sampling FPS rate (e.g. 1.0 to 15.0)"),
@@ -372,71 +433,73 @@ async def start_video_processing(
 ) -> ProcessJobResponse:
     target_path = None
 
-    if file:
-        ext = Path(file.filename or "traffic_footage.mp4").suffix.lower()
+    if file and getattr(file, "filename", None):
+        ext = Path(file.filename).suffix.lower()
         temp_input_path = str(UPLOAD_TEMP_DIR / f"{uuid.uuid4()}{ext}")
         with open(temp_input_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-        target_path = temp_input_path
+
+        # If user uploaded an image (JPG/PNG/WEBP), convert it to a 3-second 10-FPS MP4 clip
+        if ext in (".jpg", ".jpeg", ".png", ".webp"):
+            img = cv2.imread(temp_input_path)
+            if img is not None:
+                h, w = img.shape[:2]
+                vid_path = str(UPLOAD_TEMP_DIR / f"{uuid.uuid4()}_imgvid.mp4")
+                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                out_vid = cv2.VideoWriter(vid_path, fourcc, 10.0, (w, h))
+                for _ in range(30):
+                    out_vid.write(img)
+                out_vid.release()
+                target_path = vid_path
+            else:
+                target_path = temp_input_path
+        else:
+            target_path = temp_input_path
+
     elif upload_id:
-        # Check if upload_id matches a Sentinel camera or preset
-        clean_id = upload_id.strip()
-        cam_sample = find_sample_asset(f"{clean_id}_sample.mp4")
-        cam_real = find_sample_asset(f"{clean_id}_real_cctv.mp4")
+        clean_id = upload_id.strip().lower().replace(".mp4", "")
 
-        if cam_sample and cam_sample.exists():
-            temp_input_path = str(UPLOAD_TEMP_DIR / f"{uuid.uuid4()}_{clean_id}.mp4")
-            shutil.copyfile(str(cam_sample), temp_input_path)
-            target_path = temp_input_path
-        elif cam_real and cam_real.exists():
-            temp_input_path = str(UPLOAD_TEMP_DIR / f"{uuid.uuid4()}_{clean_id}.mp4")
-            shutil.copyfile(str(cam_real), temp_input_path)
-            target_path = temp_input_path
-        elif clean_id.startswith("cam") and len(clean_id) <= 6:
-            # Capture 5 seconds live from the requested RTSP camera
-            temp_input_path = str(UPLOAD_TEMP_DIR / f"{uuid.uuid4()}_{clean_id}.mp4")
-            rtsp_url = f"rtsp://103.250.160.189:8554/stream/{clean_id}"
-            try:
-                os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
-                cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
-                if cap.isOpened():
-                    fps = 25.0
-                    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 1920)
-                    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 1080)
-                    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                    out = cv2.VideoWriter(temp_input_path, fourcc, fps, (w, h))
-                    import time
-                    st = time.time()
-                    fc = 0
-                    while (time.time() - st) < 4.0 and fc < 100:
-                        ret, frame = cap.read()
-                        if not ret or frame is None:
-                            break
-                        out.write(frame)
-                        fc += 1
-                    cap.release()
-                    out.release()
-                    if fc > 10:
-                        target_path = temp_input_path
-            except Exception as cap_err:
-                logger.warning(f"Failed to capture live clip from {clean_id}: {cap_err}")
+        # 1. Primary: Direct 10-15s live video capture from the actual camera stream
+        if any(keyword in clean_id for keyword in ("cam", "junction", "stream", "sentinel", "cctv")):
+            live_clip = await capture_live_stream_clip(clean_id, num_segments=2)
+            if live_clip:
+                target_path = live_clip
 
+        # 2. Check local sample assets or camera asset if live capture was not needed or unavailable
         if not target_path:
-            sample_asset = find_sample_asset(f"{clean_id}_sample.mp4") or find_sample_asset("sample_traffic_cctv.mp4") or find_sample_asset("cam01_sample.mp4")
+            cam_sample = (
+                find_sample_asset(f"{clean_id}_sample.mp4")
+                or find_sample_asset(f"{clean_id}.mp4")
+                or find_sample_asset(f"{clean_id}")
+            )
+            if cam_sample and cam_sample.exists():
+                temp_input_path = str(UPLOAD_TEMP_DIR / f"{uuid.uuid4()}_{clean_id}.mp4")
+                shutil.copyfile(str(cam_sample), temp_input_path)
+                target_path = temp_input_path
+
+        # 3. Check previously uploaded file matches
+        if not target_path:
+            matches = list(UPLOAD_TEMP_DIR.glob(f"{upload_id}.*"))
+            if matches:
+                target_path = str(matches[0])
+
+    # Final fallback if neither file nor upload_id found
+    if not target_path or not os.path.exists(target_path):
+        # Attempt live capture for default cam01
+        live_clip = await capture_live_stream_clip("cam01", num_segments=2)
+        if live_clip:
+            target_path = live_clip
+        else:
+            sample_asset = find_sample_asset("sample_traffic_cctv.mp4") or find_sample_asset("cam01_sample.mp4")
             if sample_asset and sample_asset.exists():
-                temp_input_path = str(UPLOAD_TEMP_DIR / f"{uuid.uuid4()}_sample.mp4")
+                temp_input_path = str(UPLOAD_TEMP_DIR / f"{uuid.uuid4()}_default.mp4")
                 shutil.copyfile(str(sample_asset), temp_input_path)
                 target_path = temp_input_path
             else:
-                matches = list(UPLOAD_TEMP_DIR.glob(f"{upload_id}.*"))
-                if matches:
-                    target_path = str(matches[0])
-
-    if not target_path or not os.path.exists(target_path):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Valid video file or upload_id is required.",
-        )
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Valid video file or upload_id is required.",
+                )
 
     try:
         proc_mode = ProcessingMode(mode.lower().strip())
@@ -490,22 +553,42 @@ async def get_camera_live_snapshot(
     camera_id: str,
     confidence_threshold: float = Query(0.35),
 ):
-    """Fetches a real-time live frame from the RTSP camera stream and runs instant YOLO + ANPR."""
+    """Fetches a real-time live frame from the RTSP/HLS camera stream and runs instant YOLO + ANPR."""
     clean_id = camera_id.strip().lower()
-    rtsp_url = f"rtsp://103.250.160.189:8554/stream/{clean_id}"
-
-    os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
-    cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
+    m = re.search(r"(cam\d+)", clean_id)
+    norm_cam = m.group(1) if m else clean_id
     
     frame = None
-    if cap.isOpened():
-        ret, read_frame = cap.read()
-        if ret and read_frame is not None:
-            frame = read_frame
-        cap.release()
+
+    # 1. Primary: capture directly from live Sentinel HLS stream
+    try:
+        live_clip = await capture_live_stream_clip(norm_cam, num_segments=1)
+        if live_clip:
+            cap_live = cv2.VideoCapture(live_clip)
+            if cap_live.isOpened():
+                ret, l_frame = cap_live.read()
+                if ret and l_frame is not None:
+                    frame = l_frame
+                cap_live.release()
+    except Exception as ex:
+        logger.debug(f"Direct live HLS snapshot notice: {ex}")
+
+    # 2. Secondary: RTSP capture fallback
+    if frame is None:
+        rtsp_url = f"rtsp://103.250.160.189:8554/stream/{clean_id}"
+        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+        try:
+            cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
+            if cap.isOpened():
+                ret, read_frame = cap.read()
+                if ret and read_frame is not None:
+                    frame = read_frame
+                cap.release()
+        except Exception:
+            pass
 
     if frame is None:
-        # Fallback to local sample clip if live RTSP momentarily unreachable
+        # Fallback to local sample clip if live stream momentarily unreachable
         sample_path = find_sample_asset(f"{clean_id}_sample.mp4") or find_sample_asset("sample_traffic_cctv.mp4") or find_sample_asset("cam01_sample.mp4")
         if sample_path and sample_path.exists():
             cap_sample = cv2.VideoCapture(str(sample_path))

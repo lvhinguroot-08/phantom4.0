@@ -354,8 +354,9 @@ export const CameraMap: React.FC<CameraMapProps> = ({
             <div className="flyout-video-embed">
               <CameraPlayer
                 camera={selectedCamera}
+                streamUrl={selectedCamera.streams?.[0]?.stream_url}
                 status={selectedCamera.status}
-                protocol="HLS"
+                protocol={selectedCamera.streams?.[0]?.protocol || 'HLS'}
                 fps={selectedCamera.fps || 30}
                 quality="EXCELLENT"
               />
@@ -432,8 +433,9 @@ export const CameraMap: React.FC<CameraMapProps> = ({
             <div className="modal-video-body">
               <CameraPlayer
                 camera={liveStreamModalCam}
+                streamUrl={liveStreamModalCam.streams?.[0]?.stream_url}
                 status={liveStreamModalCam.status}
-                protocol="HLS"
+                protocol={liveStreamModalCam.streams?.[0]?.protocol || 'HLS'}
                 fps={liveStreamModalCam.fps || 30}
                 quality="EXCELLENT"
               />

@@ -121,7 +121,7 @@ export const AITestingDashboard: React.FC = () => {
       let res;
       if (selectedSource === 'upload') {
         if (!uploadedFile) {
-          setErrorMsg('Please choose a video file to upload or select sample CCTV footage.');
+          setErrorMsg('Please select a video or image file to upload or choose a live Sentinel CCTV feed.');
           setIsProcessing(false);
           return;
         }
@@ -682,7 +682,7 @@ export const AITestingDashboard: React.FC = () => {
                   cursor: 'pointer',
                 }}
               >
-                Sentinel 30 CCTV Grid
+                Live Sentinel Stream (10-15s Capture)
               </button>
               <button
                 onClick={() => { setSelectedSource('sample'); setSnapshotResult(null); }}
@@ -716,7 +716,7 @@ export const AITestingDashboard: React.FC = () => {
                   cursor: 'pointer',
                 }}
               >
-                Upload File
+                Upload File (Video / Image)
               </button>
             </div>
           </div>
@@ -797,13 +797,13 @@ export const AITestingDashboard: React.FC = () => {
                     }}
                   >
                     <span>
-                      RTSP TCP:{' '}
+                      LIVE STREAM:{' '}
                       <code style={{ color: 'var(--accent-purple)' }}>
-                        rtsp://103.250.160.189:8554/stream/{selectedCameraId}
+                        {selectedCameraId.toUpperCase()} (HLS Direct Capture)
                       </code>
                     </span>
                     <span style={{ color: 'var(--accent-healthy)', fontWeight: 800 }}>
-                      ● SENTINEL ONLINE (H.264 1080p 25 FPS)
+                      ● SENTINEL ONLINE (Live 10-15s Direct Ingestion)
                     </span>
                   </div>
                 );
@@ -852,17 +852,17 @@ export const AITestingDashboard: React.FC = () => {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="video/*"
+                accept="video/*,image/*"
                 onChange={handleFileChange}
                 style={{ display: 'none' }}
               />
               <Upload size={20} style={{ color: 'var(--accent-purple)' }} />
               <div>
                 <strong style={{ color: 'var(--accent-purple)', fontSize: '0.84rem', fontFamily: 'var(--font-mono)' }}>
-                  {uploadedFileName || 'Click to browse video file'}
+                  {uploadedFileName || 'Click to browse video or image file'}
                 </strong>
                 <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                  Supports MP4, AVI, MOV, MKV, WebM
+                  Supports MP4, AVI, MOV, MKV, WebM, JPG, PNG, WEBP
                 </p>
               </div>
             </div>
@@ -933,7 +933,7 @@ export const AITestingDashboard: React.FC = () => {
                 }}
               >
                 <Play size={16} fill="#ffffff" />
-                <span>START PROCESSING</span>
+                <span>{selectedSource === 'sentinel_grid' ? 'CAPTURE & PROCESS LIVE FEED (10-15s)' : 'START PROCESSING'}</span>
               </button>
             ) : (
               <button

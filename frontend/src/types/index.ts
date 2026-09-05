@@ -31,7 +31,7 @@ export interface SystemInfo {
 }
 
 export type CameraStatus = 'ONLINE' | 'OFFLINE' | 'DEGRADED' | 'MAINTENANCE' | 'UNKNOWN';
-export type StreamProtocol = 'RTSP' | 'HLS' | 'WEBRTC' | 'ONVIF' | 'HTTP';
+export type StreamProtocol = 'RTSP' | 'HLS' | 'WEBRTC' | 'ONVIF' | 'HTTP' | 'MP4' | 'MJPEG';
 export type CameraType = 'FIXED' | 'PTZ' | 'DOME' | 'THERMAL' | 'ANPR' | 'MULTI_SENSOR';
 
 export interface CameraStream {

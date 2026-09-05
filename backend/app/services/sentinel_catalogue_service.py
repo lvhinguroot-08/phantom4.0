@@ -31,7 +31,7 @@ class SentinelCatalogueService:
         adapter: Optional[Corp8SourceAdapter] = None,
     ):
         self.base_url = (base_url or settings.SENTINEL_BASE_URL).rstrip("/")
-        self.catalogue_path = catalogue_path or getattr(settings, "SENTINEL_CATALOGUE_PATH", "/api/ingest")
+        self.catalogue_path = catalogue_path or getattr(settings, "SENTINEL_CATALOGUE_PATH", "/cameras.json")
         self.adapter = adapter or Corp8SourceAdapter(base_url=self.base_url, catalogue_path=self.catalogue_path)
 
         # Connection & sync state
@@ -99,17 +99,18 @@ class SentinelCatalogueService:
                     "codec": "H264",
                     "resolution": "1080p",
                     "fps": 25.0,
-                    "rtsp_url": src.get("rtsp_url"),
-                    "whep_url": src.get("webrtc_url") or src.get("whep_url"),
-                    "webrtc_url": src.get("webrtc_url"),
-                    "hls_url": f"/api/v1/streams/{cam_code}/video.mp4",
+                    "rtsp_url": settings.get_authenticated_rtsp_url(cam_code),
+                    "whep_url": settings.get_authenticated_whep_url(cam_code),
+                    "webrtc_url": settings.get_authenticated_whep_url(cam_code),
+                    "hls_url": settings.get_sentinel_hls_url(cam_code),
                     "last_seen": datetime.now(timezone.utc).isoformat(),
                 }
-            if len(self.discovered_cameras) > 0:
+            if len(self.discovered_cameras) > 0 and self.adapter is None:
                 self.sentinel_status = "ONLINE"
                 self.catalogue_state = "SYNCED"
         except Exception:
             pass
+
 
     def calculate_backoff(self, attempt: int) -> float:
         """
@@ -195,10 +196,10 @@ class SentinelCatalogueService:
                     "resolution": cam.streams[0].resolution if cam.streams else "1080p",
                     "fps": cam.streams[0].fps if cam.streams else 25.0,
                     "bitrate_kbps": cam.streams[0].bitrate_kbps if cam.streams else None,
-                    "rtsp_url": next((s.stream_url for s in cam.streams if s.protocol == "RTSP"), None),
-                    "whep_url": next((s.stream_url for s in cam.streams if s.protocol == "WEBRTC"), None),
-                    "webrtc_url": next((s.stream_url for s in cam.streams if s.protocol == "WEBRTC"), None),
-                    "hls_url": next((s.stream_url for s in cam.streams if s.protocol == "HLS"), None),
+                    "rtsp_url": next((s.stream_url for s in cam.streams if s.protocol == "RTSP"), None) or settings.get_authenticated_rtsp_url(cam_id),
+                    "whep_url": next((s.stream_url for s in cam.streams if s.protocol == "WEBRTC"), None) or settings.get_authenticated_whep_url(cam_id),
+                    "webrtc_url": next((s.stream_url for s in cam.streams if s.protocol == "WEBRTC"), None) or settings.get_authenticated_whep_url(cam_id),
+                    "hls_url": next((s.stream_url for s in cam.streams if s.protocol == "HLS"), None) or settings.get_sentinel_hls_url(cam_id),
                     "last_seen": self.last_sync_time.isoformat(),
                     "raw_metadata": cam.raw_metadata,
                 }
@@ -253,23 +254,33 @@ class SentinelCatalogueService:
             }
 
         except Exception as ex:
-            # When remote sync fails, seamlessly sustain the local Sentinel camera network
-            if not self.discovered_cameras or len(self.discovered_cameras) < 30:
+            logger.error(f"[Sentinel Catalogue] Sync failed: {ex}", exc_info=True)
+            self.consecutive_failures += 1
+            self.reconnect_attempt += 1
+            err_msg = str(ex)
+            self.last_error = err_msg
+
+
+            if "502" in err_msg or "degraded" in err_msg.lower() or "timeout" in err_msg.lower() or "timed out" in err_msg.lower() or self.consecutive_failures <= 3:
+                self.sentinel_status = "DEGRADED"
+            else:
+                self.sentinel_status = "OFFLINE"
+
+            self.catalogue_state = "RETRYING"
+
+            if not self.discovered_cameras and self.adapter is None:
                 self._seed_initial_cameras()
 
-            self.sentinel_status = "ONLINE"
-            self.catalogue_state = "SYNCED"
-            self.reconnect_attempt = 0
-            self.last_error = None
 
             return {
-                "success": True,
-                "sentinel_status": "ONLINE",
-                "catalogue_state": "SYNCED",
-                "error": None,
-                "reconnect_attempt": 0,
-                "total_cameras": max(len(self.discovered_cameras), 30),
+                "success": False,
+                "sentinel_status": self.sentinel_status,
+                "catalogue_state": self.catalogue_state,
+                "error": err_msg,
+                "reconnect_attempt": self.reconnect_attempt,
+                "total_cameras": len(self.discovered_cameras),
             }
+
 
     async def _sync_loop(self):
         """Continuous background synchronization loop with exponential backoff."""

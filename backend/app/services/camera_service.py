@@ -375,21 +375,32 @@ class CameraService:
             return CameraCoverageResponse(**metrics)
         except Exception:
             all_cams = self._generate_fallback_cameras()
-            districts = set()
-            departments = set()
-            online_count = sum(1 for c in all_cams if c.connectivity_status == "ONLINE")
+            by_district: Dict[str, int] = {}
+            by_dept: Dict[str, int] = {}
+            by_status: Dict[str, int] = {}
+            by_type: Dict[str, int] = {}
+            online_count = sum(1 for c in all_cams if getattr(c, "connectivity_status", "ONLINE") == "ONLINE")
+
             for c in all_cams:
-                if c.location:
-                    districts.add(c.location.district)
-                if c.department:
-                    departments.add(c.department.name)
+                d_name = c.location.district if c.location else "Ahmedabad"
+                by_district[d_name] = by_district.get(d_name, 0) + 1
+
+                dept_name = c.department.name if c.department else "Police Department"
+                by_dept[dept_name] = by_dept.get(dept_name, 0) + 1
+
+                status_val = getattr(c, "connectivity_status", "ONLINE")
+                by_status[status_val] = by_status.get(status_val, 0) + 1
+
+                type_val = getattr(c, "camera_type", "ANPR")
+                by_type[type_val] = by_type.get(type_val, 0) + 1
+
             return CameraCoverageResponse(
                 total_cameras=len(all_cams),
-                online_cameras=online_count,
-                active_cameras=len(all_cams),
-                coverage_percentage=round((online_count / len(all_cams) * 100.0) if all_cams else 0.0, 2),
-                districts_covered=len(districts),
-                departments_integrated=len(departments),
+                cameras_by_department=by_dept,
+                cameras_by_district=by_district,
+                cameras_by_status=by_status,
+                cameras_by_type=by_type,
+                online_percentage=round((online_count / len(all_cams) * 100.0) if all_cams else 0.0, 2),
                 timestamp=datetime.now(timezone.utc),
             )
 

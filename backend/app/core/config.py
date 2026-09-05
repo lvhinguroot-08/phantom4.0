@@ -108,15 +108,53 @@ class Settings(BaseSettings):
     STREAM_GATEWAY_TIMEOUT_SECONDS: int = 8
     HLS_SEGMENT_DURATION_SECONDS: int = 2
     HLS_LIST_SIZE: int = 4
+    HLS_SEGMENT_RETENTION_PER_CAM: int = 15
+    HLS_MANIFEST_DISK_TTL_SEC: float = 6.0
+    HLS_MAX_SEGMENT_CACHE_MB_PER_CAM: float = 25.0
 
     # Sentinel CCTV Integration Contract
-    SENTINEL_BASE_URL: str = "https://live.corp8.cloud"
-    SENTINEL_CATALOGUE_PATH: str = "/api/ingest"
+    SENTINEL_BASE_URL: str = "https://cctv.corp8.cloud"
+    SENTINEL_CATALOGUE_PATH: str = "/cameras.json"
     SENTINEL_CONNECT_TIMEOUT: float = 5.0
     SENTINEL_READ_TIMEOUT: float = 10.0
     SENTINEL_RETRY_MAX_SECONDS: int = 30
     SENTINEL_SYNC_INTERVAL_SECONDS: int = 60
     SENTINEL_ALLOW_PRIVATE_IPS: bool = False
+    SENTINEL_RTSP_USER: Optional[str] = None
+    SENTINEL_RTSP_PASSWORD: Optional[str] = None
+    SENTINEL_RTSP_HOST: str = "103.250.160.189"
+    SENTINEL_RTSP_PORT: int = 8554
+    SENTINEL_WHEP_PORT: int = 8889
+
+    def get_authenticated_rtsp_url(self, camera_id: str) -> str:
+        """Constructs authenticating RTSP URL per Sentinel specification with encoded email."""
+        from urllib.parse import quote
+        clean_id = str(camera_id).strip().lower()
+        host = self.SENTINEL_RTSP_HOST
+        port = self.SENTINEL_RTSP_PORT
+        if self.SENTINEL_RTSP_USER and self.SENTINEL_RTSP_PASSWORD:
+            enc_user = quote(self.SENTINEL_RTSP_USER, safe="")
+            enc_pass = quote(self.SENTINEL_RTSP_PASSWORD, safe="")
+            return f"rtsp://{enc_user}:{enc_pass}@{host}:{port}/stream/{clean_id}"
+        return f"rtsp://{host}:{port}/stream/{clean_id}"
+
+    def get_authenticated_whep_url(self, camera_id: str) -> str:
+        """Constructs authenticating WHEP URL per Sentinel specification with encoded email."""
+        from urllib.parse import quote
+        clean_id = str(camera_id).strip().lower()
+        host = self.SENTINEL_RTSP_HOST
+        port = self.SENTINEL_WHEP_PORT
+        if self.SENTINEL_RTSP_USER and self.SENTINEL_RTSP_PASSWORD:
+            enc_user = quote(self.SENTINEL_RTSP_USER, safe="")
+            enc_pass = quote(self.SENTINEL_RTSP_PASSWORD, safe="")
+            return f"http://{enc_user}:{enc_pass}@{host}:{port}/stream/{clean_id}/whep"
+        return f"http://{host}:{port}/stream/{clean_id}/whep"
+
+    def get_sentinel_hls_url(self, camera_id: str) -> str:
+        """Constructs official Sentinel HLS URL for remote/browser dashboard."""
+        clean_id = str(camera_id).strip().lower()
+        base = self.SENTINEL_BASE_URL.rstrip("/")
+        return f"{base}/{clean_id}/index.m3u8"
 
     # Edge Buffering & Offline Resilience
     EDGE_BUFFER_ENABLED: bool = True

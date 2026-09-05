@@ -87,15 +87,27 @@ class TrackTemporalState:
         else:
             self.lifecycle = EventLifecycle.CONFIRMED
 
-        # 2. Temporal Category Voting (Majority vote across history)
+        # 2. Temporal Category Voting with Confidence Weighting & Hysteresis
         cat_counts: Dict[str, float] = defaultdict(float)
-        for idx, cat in enumerate(self.category_history):
-            # Recency weight
-            weight = 1.0 + (idx / float(len(self.category_history)))
+        for idx, (cat, c_conf) in enumerate(zip(self.category_history, self.conf_history)):
+            # Recency weight multiplied by detection confidence
+            weight = (1.0 + (idx / float(len(self.category_history)))) * max(0.1, float(c_conf))
             cat_counts[cat] += weight
 
-        best_cat = max(cat_counts.items(), key=lambda x: x[1])[0]
-        self.stable_category = best_cat
+        total_cat_weight = sum(cat_counts.values())
+        sorted_cats = sorted(cat_counts.items(), key=lambda x: x[1], reverse=True)
+        top_cat, top_cat_weight = sorted_cats[0]
+
+        # Hysteresis: An established stable track requires >= 65% weighted consensus to switch classes
+        if self.stable_category != "OBJECT" and len(self.category_history) >= 3:
+            if top_cat != self.stable_category:
+                if total_cat_weight > 0 and (top_cat_weight / total_cat_weight) >= 0.65:
+                    self.stable_category = top_cat
+            else:
+                self.stable_category = top_cat
+        else:
+            self.stable_category = top_cat
+
         self.stable_confidence = round(float(sum(self.conf_history)) / max(1, len(self.conf_history)), 3)
 
         # 3. Temporal Subtype Voting & Hysteresis

@@ -46,7 +46,7 @@ class StreamConfigRequest(BaseModel):
     source_url: str = Field(..., description="RTSP URL, HTTP HLS stream, or USB index ('0', '1')")
     sample_fps: float = Field(default=2.0, ge=0.2, le=30.0, description="Inference sampling rate (FPS)")
     alert_classes: List[str] = Field(
-        default_factory=lambda: ["PERSON", "CAR", "LICENSE_PLATE", "MOTORCYCLE", "TRUCK", "BUS"],
+        default_factory=lambda: ["LICENSE_PLATE", "NO_HELMET", "TRIPLE_RIDING"],
         description="Target classes that trigger high-priority alerts",
     )
     confidence_threshold: float = Field(default=0.35, ge=0.1, le=1.0)
@@ -139,6 +139,12 @@ class CameraStreamWorker:
         logger.info(f"Stopped continuous stream worker for [{self.camera_id}]")
 
     def _should_trigger_alert(self, obj_class: str, now_epoch: float) -> bool:
+        ORDINARY_CLASSES = {
+            "PERSON", "CAR", "MOTORCYCLE", "SCOOTER", "AUTO_RICKSHAW",
+            "BUS", "TRUCK", "LCV_TEMPO", "BICYCLE", "TWO_WHEELER"
+        }
+        if obj_class.upper() in ORDINARY_CLASSES:
+            return False
         if obj_class not in self.config.alert_classes:
             return False
         last_time = self._last_alert_time.get(obj_class, 0.0)

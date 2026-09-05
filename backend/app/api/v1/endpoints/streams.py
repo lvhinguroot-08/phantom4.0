@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from fastapi.responses import FileResponse, Response as RawResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.db.dependencies import get_db
 from app.schemas.common import ApiResponse
 from app.schemas.stream import (
@@ -74,6 +75,10 @@ async def proxy_whep_stream(
 
     body = await request.body()
     client = await stream_gateway_service.get_http_client()
+    auth = None
+    if settings.SENTINEL_RTSP_USER and settings.SENTINEL_RTSP_PASSWORD:
+        auth = (settings.SENTINEL_RTSP_USER, settings.SENTINEL_RTSP_PASSWORD)
+
     try:
         upstream_resp = await client.request(
             method=request.method,
@@ -82,6 +87,7 @@ async def proxy_whep_stream(
             headers={
                 "Content-Type": request.headers.get("Content-Type", "application/sdp"),
             },
+            auth=auth,
             timeout=10.0,
         )
         response_headers = dict(cors_headers)
@@ -176,59 +182,45 @@ async def get_camera_snapshot_jpg(
 @router.api_route(
     "/streams/{camera_id}/live.mp4",
     methods=["GET", "HEAD"],
-    summary="Direct Progressive MP4 Live Stream / Loop",
-    description="Streams 1080p live CCTV video loop directly to browser for smooth continuous playback.",
+    summary="[DEMO ONLY] Progressive MP4 Sample Video",
+    description="Serves bundled static demo MP4 for local testing only. NOT used for Sentinel live production.",
 )
 @router.api_route(
     "/streams/{camera_id}/video.mp4",
     methods=["GET", "HEAD"],
-    summary="Get Direct Live Video Stream for Camera",
-    description="Streams binary MP4 CCTV footage directly to the browser player.",
+    summary="[DEMO ONLY] Progressive MP4 Sample Video",
+    description="Serves bundled static demo MP4 for local testing only. NOT used for Sentinel live production.",
 )
 async def get_live_video_stream(
     camera_id: str,
     request: Request,
 ):
-    clean_id = camera_id.strip().lower()
-    digits = re.sub(r"\D", "", clean_id)
+    clean_id = stream_gateway_service.normalize_camera_id(camera_id)
+
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Access-Control-Allow-Origin": "*",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "X-Stream-Source": "DEMO_SAMPLE_ASSET",
+    }
+
     filenames = [
         f"{clean_id}_sample.mp4",
         f"{clean_id}.mp4",
-        f"cam{digits}_sample.mp4" if digits else None,
-        f"cam{digits.zfill(2)}_sample.mp4" if digits else None,
-        f"{clean_id}_real_cctv.mp4",
-        "sample_traffic_cctv.mp4",
-        "cam01_sample.mp4",
     ]
     for fn in filenames:
-        if fn:
-            found = find_stream_asset(fn)
-            if found and found.is_file():
-                return FileResponse(
-                    path=str(found),
-                    media_type="video/mp4",
-                    headers={
-                        "Accept-Ranges": "bytes",
-                        "Access-Control-Allow-Origin": "*",
-                        "Cache-Control": "public, max-age=3600",
-                    },
-                )
-
-    # Fallback to any mp4 in sample dirs
-    for sdir in get_sample_dirs():
-        all_mp4s = list(sdir.glob("*.mp4"))
-        if all_mp4s:
+        found = find_stream_asset(fn)
+        if found and found.is_file():
             return FileResponse(
-                path=str(all_mp4s[0]),
+                path=str(found),
                 media_type="video/mp4",
-                headers={
-                    "Accept-Ranges": "bytes",
-                    "Access-Control-Allow-Origin": "*",
-                    "Cache-Control": "public, max-age=3600",
-                },
+                headers=headers,
             )
 
-    raise HTTPException(status_code=404, detail=f"No video asset found for {camera_id}")
+    raise HTTPException(
+        status_code=404,
+        detail=f"Sample video asset not found for {clean_id}. Production feeds use Sentinel HLS directly: https://cctv.corp8.cloud/{clean_id}/index.m3u8",
+    )
 
 
 @router.get(
@@ -246,6 +238,34 @@ async def get_live_hls_manifest(
         media_type=content_type,
         headers={
             "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
+
+
+@router.get(
+    "/streams/{camera_id}/enc.key",
+    summary="Get Live HLS AES-128 Decryption Key",
+    description="Proxies AES-128 decryption key from authenticated Sentinel gateway.",
+)
+async def get_live_hls_key(
+    camera_id: str,
+    request: Request,
+) -> RawResponse:
+    key_data, content_type = await stream_gateway_service.get_hls_key(camera_id)
+    if not key_data:
+        raise HTTPException(status_code=502, detail="Failed to retrieve encryption key from Sentinel gateway")
+    return RawResponse(
+        content=key_data,
+        media_type=content_type,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
             "Cache-Control": "no-cache, no-store, must-revalidate",
             "Pragma": "no-cache",
             "Expires": "0",
@@ -264,11 +284,42 @@ async def get_live_hls_segment(
     request: Request,
 ) -> RawResponse:
     chunk_data, content_type = await stream_gateway_service.get_hls_segment(camera_id, segment_path)
+    if not chunk_data:
+        raise HTTPException(status_code=404, detail="Segment not found or empty")
     return RawResponse(
         content=chunk_data,
         media_type=content_type,
         headers={
             "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+            "Cache-Control": "public, max-age=10",
+        },
+    )
+
+
+@router.get(
+    "/streams/{camera_id}/{segment_name}",
+    summary="Get Live Video Chunk / Segment by direct filename",
+    description="Streams binary video segment (.ts or .m4s) requested directly by relative or absolute manifest path.",
+)
+async def get_live_hls_segment_direct(
+    camera_id: str,
+    segment_name: str,
+    request: Request,
+) -> RawResponse:
+    if not (segment_name.endswith(".ts") or segment_name.endswith(".m4s") or segment_name.endswith(".mp4")):
+        raise HTTPException(status_code=404, detail=f"Unrecognized stream asset {segment_name}")
+    chunk_data, content_type = await stream_gateway_service.get_hls_segment(camera_id, segment_name)
+    if not chunk_data:
+        raise HTTPException(status_code=404, detail=f"Segment {segment_name} not found or empty")
+    return RawResponse(
+        content=chunk_data,
+        media_type=content_type,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
             "Cache-Control": "public, max-age=10",
         },
     )

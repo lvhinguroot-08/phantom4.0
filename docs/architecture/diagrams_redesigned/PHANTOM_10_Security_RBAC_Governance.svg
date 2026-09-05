@@ -1,0 +1,175 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 820" width="100%" height="100%" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+  
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0E0522" />
+      <stop offset="50%" stop-color="#14092E" />
+      <stop offset="100%" stop-color="#080316" />
+    </linearGradient>
+    <linearGradient id="cardGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1A0D3B" />
+      <stop offset="100%" stop-color="#100624" />
+    </linearGradient>
+    <linearGradient id="headerGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#7C3AED" />
+      <stop offset="100%" stop-color="#4C1D95" />
+    </linearGradient>
+    <linearGradient id="purpleGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#A855F7" />
+      <stop offset="100%" stop-color="#6B21A8" />
+    </linearGradient>
+    <linearGradient id="cyanGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#06B6D4" />
+      <stop offset="100%" stop-color="#0284C7" />
+    </linearGradient>
+    <linearGradient id="greenGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#10B981" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+    <linearGradient id="redGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#EF4444" />
+      <stop offset="100%" stop-color="#B91C1C" />
+    </linearGradient>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="115%">
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000000" flood-opacity="0.65" />
+    </filter>
+    <filter id="subtleGlow" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur stdDeviation="3" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+    <marker id="arr" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#C084FC" />
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#10B981" />
+    </marker>
+    <marker id="arr-cyan" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#06B6D4" />
+    </marker>
+    <marker id="arr-red" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#EF4444" />
+    </marker>
+  </defs>
+
+  <!-- Base Background -->
+  <rect width="860" height="820" fill="url(#bgGrad)" rx="8" />
+  
+  <!-- Precision Technical Grid -->
+  <g opacity="0.03" stroke="#A855F7" stroke-width="1">
+    <line x1="0" y1="0" x2="0" y2="820" /><line x1="40" y1="0" x2="40" y2="820" /><line x1="80" y1="0" x2="80" y2="820" /><line x1="120" y1="0" x2="120" y2="820" /><line x1="160" y1="0" x2="160" y2="820" /><line x1="200" y1="0" x2="200" y2="820" /><line x1="240" y1="0" x2="240" y2="820" /><line x1="280" y1="0" x2="280" y2="820" /><line x1="320" y1="0" x2="320" y2="820" /><line x1="360" y1="0" x2="360" y2="820" /><line x1="400" y1="0" x2="400" y2="820" /><line x1="440" y1="0" x2="440" y2="820" /><line x1="480" y1="0" x2="480" y2="820" /><line x1="520" y1="0" x2="520" y2="820" /><line x1="560" y1="0" x2="560" y2="820" /><line x1="600" y1="0" x2="600" y2="820" /><line x1="640" y1="0" x2="640" y2="820" /><line x1="680" y1="0" x2="680" y2="820" /><line x1="720" y1="0" x2="720" y2="820" /><line x1="760" y1="0" x2="760" y2="820" /><line x1="800" y1="0" x2="800" y2="820" /><line x1="840" y1="0" x2="840" y2="820" />
+    <line x1="0" y1="0" x2="860" y2="0" /><line x1="0" y1="40" x2="860" y2="40" /><line x1="0" y1="80" x2="860" y2="80" /><line x1="0" y1="120" x2="860" y2="120" /><line x1="0" y1="160" x2="860" y2="160" /><line x1="0" y1="200" x2="860" y2="200" /><line x1="0" y1="240" x2="860" y2="240" /><line x1="0" y1="280" x2="860" y2="280" /><line x1="0" y1="320" x2="860" y2="320" /><line x1="0" y1="360" x2="860" y2="360" /><line x1="0" y1="400" x2="860" y2="400" /><line x1="0" y1="440" x2="860" y2="440" /><line x1="0" y1="480" x2="860" y2="480" /><line x1="0" y1="520" x2="860" y2="520" /><line x1="0" y1="560" x2="860" y2="560" /><line x1="0" y1="600" x2="860" y2="600" /><line x1="0" y1="640" x2="860" y2="640" /><line x1="0" y1="680" x2="860" y2="680" /><line x1="0" y1="720" x2="860" y2="720" /><line x1="0" y1="760" x2="860" y2="760" /><line x1="0" y1="800" x2="860" y2="800" />
+  </g>
+  <rect width="860" height="820" fill="none" stroke="#6D28D9" stroke-width="1.5" rx="8" />
+  
+  <!-- Diagram Content -->
+  
+    <!-- Top Security Perimeter -->
+    <g transform="translate(30, 20)" filter="url(#shadow)">
+      <rect width="800" height="90" rx="8" fill="url(#cardGrad)" stroke="{CYAN}" stroke-width="1.8" />
+      <text x="20" y="30" fill="{WHITE}" font-size="13.5" font-weight="800">ZERO-TRUST PERIMETER DEFENSE &amp; AUTHENTICATION LIFECYCLE</text>
+      
+      <g transform="translate(20, 42)">
+        <rect width="240" height="38" rx="4" fill="#0C041C" stroke="{BORDER}" stroke-width="1" />
+        <text x="120" y="24" fill="{CYAN}" font-size="10" font-weight="700" text-anchor="middle">JWT (HS256) Access Tokens (15m)</text>
+      </g>
+      <g transform="translate(280, 42)">
+        <rect width="240" height="38" rx="4" fill="#0C041C" stroke="{BORDER}" stroke-width="1" />
+        <text x="120" y="24" fill="{GREEN}" font-size="10" font-weight="700" text-anchor="middle">Argon2id Password Hashing</text>
+      </g>
+      <g transform="translate(540, 42)">
+        <rect width="240" height="38" rx="4" fill="#0C041C" stroke="{BORDER}" stroke-width="1" />
+        <text x="120" y="24" fill="{RED}" font-size="10" font-weight="700" text-anchor="middle">SSRF Metadata IP Protection</text>
+      </g>
+    </g>
+    
+    <!-- Role-Based Access Control (RBAC) 7 Roles Matrix -->
+    <g transform="translate(30, 125)" filter="url(#shadow)">
+      <rect width="800" height="425" rx="8" fill="url(#cardGrad)" stroke="{BORDER_LIGHT}" stroke-width="2" />
+      <rect x="0" y="0" width="800" height="34" rx="8" fill="#1C0E42" />
+      <text x="20" y="23" fill="{WHITE}" font-size="13" font-weight="800">7-ROLE GRANULAR ROLE-BASED ACCESS CONTROL (RBAC) MATRIX</text>
+    
+        <g transform="translate(20, 45)">
+          <rect width="760" height="48" rx="4" fill="#0C041C" stroke="#EF4444" stroke-width="1.2" />
+          
+          <rect x="12" y="10" width="150" height="28" rx="4" fill="#EF4444" fill-opacity="0.2" stroke="#EF4444" stroke-width="1" />
+          <text x="87" y="28" fill="#EF4444" font-size="10.5" font-weight="800" text-anchor="middle">SYSTEM_ADMIN</text>
+          
+          <text x="175" y="29" fill="#FFFFFF" font-size="10.5">Full system config, camera onboarding, user provisioning, global audit logs</text>
+        </g>
+        <g transform="translate(20, 99)">
+          <rect width="760" height="48" rx="4" fill="#0C041C" stroke="#C084FC" stroke-width="1.2" />
+          
+          <rect x="12" y="10" width="150" height="28" rx="4" fill="#C084FC" fill-opacity="0.2" stroke="#C084FC" stroke-width="1" />
+          <text x="87" y="28" fill="#C084FC" font-size="10.5" font-weight="800" text-anchor="middle">POLICE_OFFICER</text>
+          
+          <text x="175" y="29" fill="#FFFFFF" font-size="10.5">Live video monitoring, watchlist management, incident escalation, PCR dispatch</text>
+        </g>
+        <g transform="translate(20, 153)">
+          <rect width="760" height="48" rx="4" fill="#0C041C" stroke="#06B6D4" stroke-width="1.2" />
+          
+          <rect x="12" y="10" width="150" height="28" rx="4" fill="#06B6D4" fill-opacity="0.2" stroke="#06B6D4" stroke-width="1" />
+          <text x="87" y="28" fill="#06B6D4" font-size="10.5" font-weight="800" text-anchor="middle">INVESTIGATOR</text>
+          
+          <text x="175" y="29" fill="#FFFFFF" font-size="10.5">Case dossier generation, historical ANPR search, certified court evidence export</text>
+        </g>
+        <g transform="translate(20, 207)">
+          <rect width="760" height="48" rx="4" fill="#0C041C" stroke="#10B981" stroke-width="1.2" />
+          
+          <rect x="12" y="10" width="150" height="28" rx="4" fill="#10B981" fill-opacity="0.2" stroke="#10B981" stroke-width="1" />
+          <text x="87" y="28" fill="#10B981" font-size="10.5" font-weight="800" text-anchor="middle">ANALYST</text>
+          
+          <text x="175" y="29" fill="#FFFFFF" font-size="10.5">Statistical dashboards, traffic density heatmaps, model accuracy reviews</text>
+        </g>
+        <g transform="translate(20, 261)">
+          <rect width="760" height="48" rx="4" fill="#0C041C" stroke="#94A3B8" stroke-width="1.2" />
+          
+          <rect x="12" y="10" width="150" height="28" rx="4" fill="#94A3B8" fill-opacity="0.2" stroke="#94A3B8" stroke-width="1" />
+          <text x="87" y="28" fill="#94A3B8" font-size="10.5" font-weight="800" text-anchor="middle">VIEWER</text>
+          
+          <text x="175" y="29" fill="#FFFFFF" font-size="10.5">Read-only live video grid and GIS map viewing (zero mutation or export rights)</text>
+        </g>
+        <g transform="translate(20, 315)">
+          <rect width="760" height="48" rx="4" fill="#0C041C" stroke="#F59E0B" stroke-width="1.2" />
+          
+          <rect x="12" y="10" width="150" height="28" rx="4" fill="#F59E0B" fill-opacity="0.2" stroke="#F59E0B" stroke-width="1" />
+          <text x="87" y="28" fill="#F59E0B" font-size="10.5" font-weight="800" text-anchor="middle">AUDITOR</text>
+          
+          <text x="175" y="29" fill="#FFFFFF" font-size="10.5">Immutable security audit trail inspection and compliance reporting</text>
+        </g>
+        <g transform="translate(20, 369)">
+          <rect width="760" height="48" rx="4" fill="#0C041C" stroke="#C4B5FD" stroke-width="1.2" />
+          
+          <rect x="12" y="10" width="150" height="28" rx="4" fill="#C4B5FD" fill-opacity="0.2" stroke="#C4B5FD" stroke-width="1" />
+          <text x="87" y="28" fill="#C4B5FD" font-size="10.5" font-weight="800" text-anchor="middle">AI_WORKER</text>
+          
+          <text x="175" y="29" fill="#FFFFFF" font-size="10.5">Machine-to-machine inference ingestion and real-time telemetry broadcast</text>
+        </g>
+    </g>
+    
+    <!-- Tamper-Evident Audit Logging -->
+    <g transform="translate(30, 565)" filter="url(#shadow)">
+      <rect width="800" height="195" rx="8" fill="url(#cardGrad)" stroke="#10B981" stroke-width="1.8" />
+      <rect x="0" y="0" width="800" height="34" rx="8" fill="#0E2E18" />
+      <text x="20" y="23" fill="#10B981" font-size="13" font-weight="800">SECTION 65B IMMUTABLE AUDIT TRAIL &amp; SSRF PROTECTION</text>
+      
+      <g transform="translate(20, 48)">
+        <rect width="365" height="130" rx="4" fill="#0C041C" stroke="#6D28D9" stroke-width="1" />
+        <text x="16" y="22" fill="#FFFFFF" font-size="11" font-weight="700">Cryptographic Audit Logging</text>
+        <text x="16" y="40" fill="#C4B5FD" font-size="9">• Logs every API mutation, login, and export</text>
+        <text x="16" y="56" fill="#C4B5FD" font-size="9">• Captures Officer ID, Client IP, Timestamp</text>
+        <text x="16" y="72" fill="#C4B5FD" font-size="9">• Cryptographic request body hash verification</text>
+        <text x="16" y="90" fill="#FFFFFF" font-family="monospace" font-size="8.5">audit_hash = sha256(user + action + ts + req)</text>
+        <text x="16" y="112" fill="#10B981" font-size="9" font-weight="700">Immutable append-only DB table</text>
+      </g>
+      
+      <g transform="translate(415, 48)">
+        <rect width="365" height="130" rx="4" fill="#0C041C" stroke="#EF4444" stroke-width="1" />
+        <text x="16" y="22" fill="#EF4444" font-size="11" font-weight="700">SSRF &amp; Infrastructure Protection</text>
+        <text x="16" y="40" fill="#FFFFFF" font-size="9">• Blocks cloud metadata IP: 169.254.169.254</text>
+        <text x="16" y="56" fill="#FFFFFF" font-size="9">• Blocks localhost / 127.0.0.1 stream injection</text>
+        <text x="16" y="72" fill="#FFFFFF" font-size="9">• Strictly validates RTSP &amp; WHEP schemes</text>
+        <text x="16" y="90" fill="#C4B5FD" font-size="9">• Enforces CORS origin whitelisting</text>
+        <text x="16" y="112" fill="#F59E0B" font-size="9" font-weight="700">SlowAPI rate limits: 120 req/min per IP</text>
+      </g>
+    </g>
+</svg>

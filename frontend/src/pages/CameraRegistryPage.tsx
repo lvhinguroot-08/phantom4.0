@@ -526,7 +526,14 @@ export const CameraRegistryPage: React.FC = () => {
               </button>
             </div>
             <div style={{ aspectRatio: '16/9', background: '#000' }}>
-              <CameraPlayer camera={selectedLiveCam} status={selectedLiveCam.status} fps={25} quality="EXCELLENT" />
+              <CameraPlayer
+                camera={selectedLiveCam}
+                streamUrl={selectedLiveCam.streams?.[0]?.stream_url}
+                protocol={selectedLiveCam.streams?.[0]?.protocol || 'HLS'}
+                status={selectedLiveCam.status}
+                fps={30}
+                quality="EXCELLENT"
+              />
             </div>
           </div>
         </div>

@@ -10,6 +10,13 @@ _STD_INDIAN_PLATE = re.compile(r"^([A-Z]{2})([0-9]{1,2})([A-Z]{0,3})([0-9]{1,4})
 # Bharat Series: Year (2 digits) + BH + Number (4 digits) + Letters (1-2 letters)
 _BH_SERIES_PLATE = re.compile(r"^([0-9]{2})(BH)([0-9]{4})([A-Z]{1,2})$")
 
+# Common Indian State/UT Codes
+INDIAN_STATE_CODES = {
+    "AN", "AP", "AR", "AS", "BR", "CH", "CG", "DD", "DL", "DN", "GA", "GJ", "HP",
+    "HR", "JH", "JK", "KA", "KL", "LA", "LD", "MH", "ML", "MN", "MP", "MZ", "NL",
+    "OD", "PB", "PY", "RJ", "SK", "TN", "TR", "TS", "UK", "UP", "WB"
+}
+
 # Gujarat specific State Codes
 GUJARAT_RTO_CODES = {
     "01": "Ahmedabad", "02": "Mehsana", "03": "Rajkot", "04": "Bhavnagar",
@@ -23,7 +30,6 @@ GUJARAT_RTO_CODES = {
     "32": "Veraval/Gir Somnath", "33": "Botad", "34": "Chhota Udepur", "35": "Lunawada/Mahisagar",
     "36": "Morbi", "37": "Khambhalia/Devbhumi Dwarka", "38": "Bavla/Ahmedabad Rural",
 }
-
 
 # Character disambiguation mapping tables for Indian ANPR OCR errors
 CHAR_TO_DIGIT = {
@@ -97,8 +103,9 @@ def disambiguate_plate(raw_plate: str) -> str:
     if 6 <= n <= 11:
         chars = list(cleaned)
         # 0. Common state prefix OCR errors (e.g. 6J -> GJ, G1 -> GJ, C1 -> GJ)
-        if chars[0] in ("6", "C") and chars[1] == "J":
+        if chars[0] in ("6", "C") and chars[1] in ("J", "1", "I"):
             chars[0] = "G"
+            chars[1] = "J"
         elif chars[0] == "G" and chars[1] in ("1", "I", "T"):
             chars[1] = "J"
 
@@ -134,6 +141,48 @@ def normalize_plate_text(raw: Optional[str]) -> str:
         return ""
     raw_str = str(raw).strip()
     return disambiguate_plate(raw_str)
+
+
+def score_plate_format(plate: Optional[str]) -> float:
+    """
+    Score the syntactic validity of a candidate license plate string [0.0 - 1.0].
+    Used as the Format Validity component in ANPR confidence fusion.
+    """
+    if not plate:
+        return 0.0
+
+    cleaned = _STRIP_CHARS.sub("", plate).upper()
+    if len(cleaned) < 4:
+        return 0.0
+
+    # 1. Perfect BH series match
+    if _BH_SERIES_PLATE.fullmatch(cleaned):
+        return 1.0
+
+    # 2. Check standard state format
+    m = _STD_INDIAN_PLATE.fullmatch(cleaned)
+    if m:
+        state, rto, series, number = m.groups()
+        # Full 4-digit number and recognized state code -> 1.0
+        if state in INDIAN_STATE_CODES and len(number) == 4 and len(rto) == 2:
+            return 1.0
+        elif state in INDIAN_STATE_CODES:
+            return 0.90
+        else:
+            return 0.80
+
+    # 3. Partial plausibility checks
+    if 6 <= len(cleaned) <= 11:
+        prefix = cleaned[:2]
+        if prefix in INDIAN_STATE_CODES:
+            # Starts with recognized state, has at least some digits
+            has_digits = any(c.isdigit() for c in cleaned[2:])
+            if has_digits:
+                return 0.65
+        elif prefix.isalpha():
+            return 0.40
+
+    return 0.15 if len(cleaned) >= 6 else 0.0
 
 
 def looks_like_indian_plate(normalized: Optional[str]) -> bool:
@@ -194,5 +243,3 @@ def extract_plate_structure(normalized: Optional[str]) -> Dict[str, Any]:
         "rto_jurisdiction": None,
         "is_gujarat": norm.startswith("GJ"),
     }
-
-

@@ -70,3 +70,11 @@ frontend/.env
 backend/.env
 frontend/node_modules/
 node_modules/
+
+# Runtime caches & external binaries
+cloudflared.exe
+backend/manifest_cache/
+backend/segment_cache/
+backend/cookies.txt
+backend/enc.key
+

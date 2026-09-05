@@ -482,8 +482,10 @@ export const LiveMonitoringPage: React.FC = () => {
               <div style={{ aspectRatio: '16/9', background: '#000', borderRadius: 'var(--radius-md)', overflow: 'hidden', boxShadow: '0 8px 30px rgba(0,0,0,0.7)' }}>
                 <CameraPlayer
                   camera={selectedCamera}
+                  streamUrl={selectedCamera.streams?.[0]?.stream_url}
+                  protocol={selectedCamera.streams?.[0]?.protocol || 'HLS'}
                   status={selectedCamera.status}
-                  fps={selectedCamera.fps || 25}
+                  fps={selectedCamera.fps || 30}
                   quality="EXCELLENT"
                   isAiOverlayEnabled={isGlobalAiEnabled}
                 />

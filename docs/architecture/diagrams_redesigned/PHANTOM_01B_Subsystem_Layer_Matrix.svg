@@ -1,0 +1,216 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 820" width="100%" height="100%" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+  
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0E0522" />
+      <stop offset="50%" stop-color="#14092E" />
+      <stop offset="100%" stop-color="#080316" />
+    </linearGradient>
+    <linearGradient id="cardGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1A0D3B" />
+      <stop offset="100%" stop-color="#100624" />
+    </linearGradient>
+    <linearGradient id="headerGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#7C3AED" />
+      <stop offset="100%" stop-color="#4C1D95" />
+    </linearGradient>
+    <linearGradient id="purpleGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#A855F7" />
+      <stop offset="100%" stop-color="#6B21A8" />
+    </linearGradient>
+    <linearGradient id="cyanGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#06B6D4" />
+      <stop offset="100%" stop-color="#0284C7" />
+    </linearGradient>
+    <linearGradient id="greenGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#10B981" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+    <linearGradient id="redGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#EF4444" />
+      <stop offset="100%" stop-color="#B91C1C" />
+    </linearGradient>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="115%">
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000000" flood-opacity="0.65" />
+    </filter>
+    <filter id="subtleGlow" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur stdDeviation="3" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+    <marker id="arr" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#C084FC" />
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#10B981" />
+    </marker>
+    <marker id="arr-cyan" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#06B6D4" />
+    </marker>
+    <marker id="arr-red" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#EF4444" />
+    </marker>
+  </defs>
+
+  <!-- Base Background -->
+  <rect width="860" height="820" fill="url(#bgGrad)" rx="8" />
+  
+  <!-- Precision Technical Grid -->
+  <g opacity="0.03" stroke="#A855F7" stroke-width="1">
+    <line x1="0" y1="0" x2="0" y2="820" /><line x1="40" y1="0" x2="40" y2="820" /><line x1="80" y1="0" x2="80" y2="820" /><line x1="120" y1="0" x2="120" y2="820" /><line x1="160" y1="0" x2="160" y2="820" /><line x1="200" y1="0" x2="200" y2="820" /><line x1="240" y1="0" x2="240" y2="820" /><line x1="280" y1="0" x2="280" y2="820" /><line x1="320" y1="0" x2="320" y2="820" /><line x1="360" y1="0" x2="360" y2="820" /><line x1="400" y1="0" x2="400" y2="820" /><line x1="440" y1="0" x2="440" y2="820" /><line x1="480" y1="0" x2="480" y2="820" /><line x1="520" y1="0" x2="520" y2="820" /><line x1="560" y1="0" x2="560" y2="820" /><line x1="600" y1="0" x2="600" y2="820" /><line x1="640" y1="0" x2="640" y2="820" /><line x1="680" y1="0" x2="680" y2="820" /><line x1="720" y1="0" x2="720" y2="820" /><line x1="760" y1="0" x2="760" y2="820" /><line x1="800" y1="0" x2="800" y2="820" /><line x1="840" y1="0" x2="840" y2="820" />
+    <line x1="0" y1="0" x2="860" y2="0" /><line x1="0" y1="40" x2="860" y2="40" /><line x1="0" y1="80" x2="860" y2="80" /><line x1="0" y1="120" x2="860" y2="120" /><line x1="0" y1="160" x2="860" y2="160" /><line x1="0" y1="200" x2="860" y2="200" /><line x1="0" y1="240" x2="860" y2="240" /><line x1="0" y1="280" x2="860" y2="280" /><line x1="0" y1="320" x2="860" y2="320" /><line x1="0" y1="360" x2="860" y2="360" /><line x1="0" y1="400" x2="860" y2="400" /><line x1="0" y1="440" x2="860" y2="440" /><line x1="0" y1="480" x2="860" y2="480" /><line x1="0" y1="520" x2="860" y2="520" /><line x1="0" y1="560" x2="860" y2="560" /><line x1="0" y1="600" x2="860" y2="600" /><line x1="0" y1="640" x2="860" y2="640" /><line x1="0" y1="680" x2="860" y2="680" /><line x1="0" y1="720" x2="860" y2="720" /><line x1="0" y1="760" x2="860" y2="760" /><line x1="0" y1="800" x2="860" y2="800" />
+  </g>
+  <rect width="860" height="820" fill="none" stroke="#6D28D9" stroke-width="1.5" rx="8" />
+  
+  <!-- Diagram Content -->
+  
+        <g transform="translate(30, 20)" filter="url(#shadow)">
+          <rect width="385" height="235" rx="8" fill="url(#cardGrad)" stroke="#6D28D9" stroke-width="1.5" />
+          <rect x="0" y="0" width="385" height="38" rx="8" fill="#1C0E3F" />
+          <text x="16" y="24" fill="#FFFFFF" font-size="12.5" font-weight="700">INGESTION & GATEWAY SUBSYSTEM</text>
+          <text x="16" y="52" fill="#C4B5FD" font-size="9.5" font-weight="400">backend/app/services/stream_gateway_service.py</text>
+        
+            <g transform="translate(12, 64)">
+              <rect width="361" height="35" rx="4" fill="#0B0418" stroke="#2D1160" stroke-width="1" />
+              <circle cx="12" cy="17" r="4" fill="#10B981" />
+              <text x="24" y="16" fill="#FFFFFF" font-size="10.5" font-weight="700">Dynamic Ingestion:</text>
+              <text x="24" y="28" fill="#C4B5FD" font-size="9.5">Corp8SourceAdapter querying /api/ingest dynamically</text>
+            </g>
+            <g transform="translate(12, 104)">
+              <rect width="361" height="35" rx="4" fill="#0B0418" stroke="#2D1160" stroke-width="1" />
+              <circle cx="12" cy="17" r="4" fill="#06B6D4" />
+              <text x="24" y="16" fill="#FFFFFF" font-size="10.5" font-weight="700">RTSP TCP Receiver:</text>
+              <text x="24" y="28" fill="#C4B5FD" font-size="9.5">OPENCV_FFMPEG_CAPTURE_OPTIONS=rtsp_transport;tcp</text>
+            </g>
+            <g transform="translate(12, 144)">
+              <rect width="361" height="35" rx="4" fill="#0B0418" stroke="#2D1160" stroke-width="1" />
+              <circle cx="12" cy="17" r="4" fill="#C084FC" />
+              <text x="24" y="16" fill="#FFFFFF" font-size="10.5" font-weight="700">WebRTC WHEP Proxy:</text>
+              <text x="24" y="28" fill="#C4B5FD" font-size="9.5">Sub-35ms browser video preview pipeline</text>
+            </g>
+            <g transform="translate(12, 184)">
+              <rect width="361" height="35" rx="4" fill="#0B0418" stroke="#2D1160" stroke-width="1" />
+              <circle cx="12" cy="17" r="4" fill="#F59E0B" />
+              <text x="24" y="16" fill="#FFFFFF" font-size="10.5" font-weight="700">Ring Buffer Thread:</text>
+              <text x="24" y="28" fill="#C4B5FD" font-size="9.5">1-slot decoupled latest frame; 0 queue buildup</text>
+            </g></g>
+        <g transform="translate(445, 20)" filter="url(#shadow)">
+          <rect width="385" height="235" rx="8" fill="url(#cardGrad)" stroke="#6D28D9" stroke-width="1.5" />
+          <rect x="0" y="0" width="385" height="38" rx="8" fill="#1C0E3F" />
+          <text x="16" y="24" fill="#FFFFFF" font-size="12.5" font-weight="700">AI VISION & CLASSIFICATION CORE</text>
+          <text x="16" y="52" fill="#C4B5FD" font-size="9.5" font-weight="400">backend/app/ai/yolo26/ & specialized_classifiers.py</text>
+        
+            <g transform="translate(12, 64)">
+              <rect width="361" height="35" rx="4" fill="#0B0418" stroke="#2D1160" stroke-width="1" />
+              <circle cx="12" cy="17" r="4" fill="#06B6D4" />
+              <text x="24" y="16" fill="#FFFFFF" font-size="10.5" font-weight="700">Shared YOLO26 Core:</text>
+              <text x="24" y="28" fill="#C4B5FD" font-size="9.5">Singleton weights with CUDA stream separation</text>
+            </g>
+            <g transform="translate(12, 104)">
+              <rect width="361" height="35" rx="4" fill="#0B0418" stroke="#2D1160" stroke-width="1" />
+              <circle cx="12" cy="17" r="4" fill="#C084FC" />
+              <text x="24" y="16" fill="#FFFFFF" font-size="10.5" font-weight="700">3-Tier Hierarchy:</text>
+              <text x="24" y="28" fill="#C4B5FD" font-size="9.5">L1 Category -> L2 Subtype -> L3 Make/Model</text>
+            </g>
+            <g transform="translate(12, 144)">
+              <rect width="361" height="35" rx="4" fill="#0B0418" stroke="#2D1160" stroke-width="1" />
+              <circle cx="12" cy="17" r="4" fill="#10B981" />
+              <text x="24" y="16" fill="#FFFFFF" font-size="10.5" font-weight="700">Specialized Models:</text>
+              <text x="24" y="28" fill="#C4B5FD" font-size="9.5">Activa/Splendor (2W) and WagonR/Swift (Car)</text>
+            </g>
+            <g transform="translate(12, 184)">
+              <rect width="361" height="35" rx="4" fill="#0B0418" stroke="#2D1160" stroke-width="1" />
+              <circle cx="12" cy="17" r="4" fill="#F59E0B" />
+              <text x="24" y="16" fill="#FFFFFF" font-size="10.5" font-weight="700">Gujarat ANPR:</text>
+              <text x="24" y="28" fill="#C4B5FD" font-size="9.5">Bilateral filter + EasyOCR + GJ01-GJ38 regex</text>
+            </g></g>
+        <g transform="translate(30, 280)" filter="url(#shadow)">
+          <rect width="385" height="245" rx="8" fill="url(#cardGrad)" stroke="#6D28D9" stroke-width="1.5" />
+          <rect x="0" y="0" width="385" height="38" rx="8" fill="#1C0E3F" />
+          <text x="16" y="24" fill="#FFFFFF" font-size="12.5" font-weight="700">SURVEILLANCE SERVICES & FSM</text>
+          <text x="16" y="52" fill="#C4B5FD" font-size="9.5" font-weight="400">backend/app/services/alert_engine.py & incidents.py</text>
+        
+            <g transform="translate(12, 64)">
+              <rect width="361" height="35" rx="4" fill="#0B0418" stroke="#2D1160" stroke-width="1" />
+              <circle cx="12" cy="17" r="4" fill="#EF4444" />
+              <text x="24" y="16" fill="#FFFFFF" font-size="10.5" font-weight="700">Anti-Storm Cooldown:</text>
+              <text x="24" y="28" fill="#C4B5FD" font-size="9.5">60s sliding window suppresses redundant alerts</text>
+            </g>
+            <g transform="translate(12, 104)">
+              <rect width="361" height="35" rx="4" fill="#0B0418" stroke="#2D1160" stroke-width="1" />
+              <circle cx="12" cy="17" r="4" fill="#F59E0B" />
+              <text x="24" y="16" fill="#FFFFFF" font-size="10.5" font-weight="700">Incident Lifecycle:</text>
+              <text x="24" y="28" fill="#C4B5FD" font-size="9.5">FSM: OPEN -> INVESTIGATING -> RESOLVED -> CLOSED</text>
+            </g>
+            <g transform="translate(12, 144)">
+              <rect width="361" height="35" rx="4" fill="#0B0418" stroke="#2D1160" stroke-width="1" />
+              <circle cx="12" cy="17" r="4" fill="#10B981" />
+              <text x="24" y="16" fill="#FFFFFF" font-size="10.5" font-weight="700">SHA-256 Hashing:</text>
+              <text x="24" y="28" fill="#C4B5FD" font-size="9.5">hashlib.sha256(crop_bytes) generated at capture</text>
+            </g>
+            <g transform="translate(12, 184)">
+              <rect width="361" height="35" rx="4" fill="#0B0418" stroke="#2D1160" stroke-width="1" />
+              <circle cx="12" cy="17" r="4" fill="#06B6D4" />
+              <text x="24" y="16" fill="#FFFFFF" font-size="10.5" font-weight="700">FastAPI Routers:</text>
+              <text x="24" y="28" fill="#C4B5FD" font-size="9.5">23 modular routers with dependencies & auth</text>
+            </g></g>
+        <g transform="translate(445, 280)" filter="url(#shadow)">
+          <rect width="385" height="245" rx="8" fill="url(#cardGrad)" stroke="#6D28D9" stroke-width="1.5" />
+          <rect x="0" y="0" width="385" height="38" rx="8" fill="#1C0E3F" />
+          <text x="16" y="24" fill="#FFFFFF" font-size="12.5" font-weight="700">SPATIAL GIS & COPILOT AGENT</text>
+          <text x="16" y="52" fill="#C4B5FD" font-size="9.5" font-weight="400">backend/app/core/cctv_gis_data.py & copilot.py</text>
+        
+            <g transform="translate(12, 64)">
+              <rect width="361" height="35" rx="4" fill="#0B0418" stroke="#2D1160" stroke-width="1" />
+              <circle cx="12" cy="17" r="4" fill="#10B981" />
+              <text x="24" y="16" fill="#FFFFFF" font-size="10.5" font-weight="700">CCTV FOV Wedges:</text>
+              <text x="24" y="28" fill="#C4B5FD" font-size="9.5">Trigonometric wedge: (lat + d*sin θ, lon + d*cos θ)</text>
+            </g>
+            <g transform="translate(12, 104)">
+              <rect width="361" height="35" rx="4" fill="#0B0418" stroke="#2D1160" stroke-width="1" />
+              <circle cx="12" cy="17" r="4" fill="#06B6D4" />
+              <text x="24" y="16" fill="#FFFFFF" font-size="10.5" font-weight="700">PostGIS Spatial:</text>
+              <text x="24" y="28" fill="#C4B5FD" font-size="9.5">GIST spatial index on cameras & sightings</text>
+            </g>
+            <g transform="translate(12, 144)">
+              <rect width="361" height="35" rx="4" fill="#0B0418" stroke="#2D1160" stroke-width="1" />
+              <circle cx="12" cy="17" r="4" fill="#C084FC" />
+              <text x="24" y="16" fill="#FFFFFF" font-size="10.5" font-weight="700">SurveillanceCopilot:</text>
+              <text x="24" y="28" fill="#C4B5FD" font-size="9.5">Autonomous agent with 40+ deterministic tools</text>
+            </g>
+            <g transform="translate(12, 184)">
+              <rect width="361" height="35" rx="4" fill="#0B0418" stroke="#2D1160" stroke-width="1" />
+              <circle cx="12" cy="17" r="4" fill="#F59E0B" />
+              <text x="24" y="16" fill="#FFFFFF" font-size="10.5" font-weight="700">Multilingual NLP:</text>
+              <text x="24" y="28" fill="#C4B5FD" font-size="9.5">Native support for English, Hindi, and Gujarati</text>
+            </g></g>
+        <g transform="translate(30, 550)" filter="url(#shadow)">
+          <rect width="800" height="230" rx="8" fill="url(#cardGrad)" stroke="#6D28D9" stroke-width="1.5" />
+          <rect x="0" y="0" width="800" height="38" rx="8" fill="#1C0E3F" />
+          <text x="16" y="24" fill="#FFFFFF" font-size="12.5" font-weight="700">ENTERPRISE DATA FABRIC & KAFKA EVENT STREAMING</text>
+          <text x="16" y="52" fill="#C4B5FD" font-size="9.5" font-weight="400">PostgreSQL 16 HA + Redis Sentinel + Apache Kafka Multi-Broker Grid</text>
+        
+            <g transform="translate(12, 64)">
+              <rect width="776" height="35" rx="4" fill="#0B0418" stroke="#2D1160" stroke-width="1" />
+              <circle cx="12" cy="17" r="4" fill="#06B6D4" />
+              <text x="24" y="16" fill="#FFFFFF" font-size="10.5" font-weight="700">PostgreSQL 16 + PostGIS:</text>
+              <text x="24" y="28" fill="#C4B5FD" font-size="9.5">Master-replica cluster with Patroni & etcd failover; temporal partitioning</text>
+            </g>
+            <g transform="translate(12, 104)">
+              <rect width="776" height="35" rx="4" fill="#0B0418" stroke="#2D1160" stroke-width="1" />
+              <circle cx="12" cy="17" r="4" fill="#EF4444" />
+              <text x="24" y="16" fill="#FFFFFF" font-size="10.5" font-weight="700">Redis 7 Hot Storage:</text>
+              <text x="24" y="28" fill="#C4B5FD" font-size="9.5">Sub-millisecond alert cache, active token blacklist, and rate-limiting sliding log</text>
+            </g>
+            <g transform="translate(12, 144)">
+              <rect width="776" height="35" rx="4" fill="#0B0418" stroke="#2D1160" stroke-width="1" />
+              <circle cx="12" cy="17" r="4" fill="#C084FC" />
+              <text x="24" y="16" fill="#FFFFFF" font-size="10.5" font-weight="700">Apache Kafka Cluster:</text>
+              <text x="24" y="28" fill="#C4B5FD" font-size="9.5">Topics: cctv.detections, cctv.alerts, cctv.telemetry (154 Mbps aggregate egress)</text>
+            </g>
+            <g transform="translate(12, 184)">
+              <rect width="776" height="35" rx="4" fill="#0B0418" stroke="#2D1160" stroke-width="1" />
+              <circle cx="12" cy="17" r="4" fill="#10B981" />
+              <text x="24" y="16" fill="#FFFFFF" font-size="10.5" font-weight="700">WebSocket Egress:</text>
+              <text x="24" y="28" fill="#C4B5FD" font-size="9.5">25-30 FPS bounding box and metadata broadcast to Netram C2 HUD</text>
+            </g></g>
+</svg>

@@ -721,8 +721,10 @@ export const GISMapPage: React.FC = () => {
           <div style={{ width: '100%', aspectRatio: '16/9', background: '#000', position: 'relative' }}>
             <CameraPlayer
               camera={selectedCamera}
+              streamUrl={selectedCamera.streams?.[0]?.stream_url}
+              protocol={selectedCamera.streams?.[0]?.protocol || 'HLS'}
               status={selectedCamera.status}
-              fps={25}
+              fps={30}
               quality="EXCELLENT"
             />
           </div>
@@ -860,8 +862,10 @@ export const GISMapPage: React.FC = () => {
             <div style={{ width: '100%', aspectRatio: '16/9', background: '#000' }}>
               <CameraPlayer
                 camera={selectedCamera}
+                streamUrl={selectedCamera.streams?.[0]?.stream_url}
+                protocol={selectedCamera.streams?.[0]?.protocol || 'HLS'}
                 status={selectedCamera.status}
-                fps={25}
+                fps={30}
                 quality="EXCELLENT"
               />
             </div>

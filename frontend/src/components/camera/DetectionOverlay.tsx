@@ -74,6 +74,8 @@ export interface DetectionOverlayProps {
   customDetections?: LiveDetectionItem[];
 }
 
+export type DetectionRingState = 'IDLE' | 'ANALYZING' | 'DETECTION_FOUND' | 'NO_DETECTION' | 'ERROR';
+
 export const DetectionOverlay: React.FC<DetectionOverlayProps> = ({
   cameraId,
   isEnabled = true,
@@ -83,6 +85,7 @@ export const DetectionOverlay: React.FC<DetectionOverlayProps> = ({
   customDetections,
 }) => {
   const [detections, setDetections] = useState<LiveDetectionItem[]>([]);
+  const [detectionState, setDetectionState] = useState<DetectionRingState>('ANALYZING');
   const [aiStats, setAiStats] = useState<{ fps: number; latency: number; objects: number }>({
     fps: 25,
     latency: 18,
@@ -94,6 +97,7 @@ export const DetectionOverlay: React.FC<DetectionOverlayProps> = ({
   // Connect to live detection endpoint and WebSocket
   useEffect(() => {
     if (!isEnabled) {
+      setDetectionState('IDLE');
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;
@@ -101,8 +105,11 @@ export const DetectionOverlay: React.FC<DetectionOverlayProps> = ({
       return;
     }
 
+    setDetectionState('ANALYZING');
+
     if (customDetections && customDetections.length > 0) {
       setDetections(customDetections);
+      setDetectionState('DETECTION_FOUND');
       return;
     }
 
@@ -112,17 +119,19 @@ export const DetectionOverlay: React.FC<DetectionOverlayProps> = ({
     fetch(`/api/v1/streams/${encodeURIComponent(cameraId)}/detections/live`)
       .then((res) => res.json())
       .then((data) => {
-        if (isMounted && data?.data?.detections) {
-          setDetections(data.data.detections);
+        if (isMounted) {
+          const objs = data?.data?.detections || [];
+          setDetections(objs);
+          setDetectionState(objs.length > 0 ? 'DETECTION_FOUND' : 'NO_DETECTION');
           setAiStats({
             fps: data.data.ai_fps || 25,
             latency: data.data.latency_ms || 18,
-            objects: data.data.detections.length,
+            objects: objs.length,
           });
         }
       })
       .catch(() => {
-        // Safe empty state on error (no fake hallucinated bounding boxes)
+        if (isMounted) setDetectionState('NO_DETECTION');
       });
 
     // 2. WebSocket Real-time live HUD stream with auto-reconnection
@@ -143,27 +152,34 @@ export const DetectionOverlay: React.FC<DetectionOverlayProps> = ({
           if (!isMounted) return;
           try {
             const data: any = JSON.parse(event.data);
-            const rawObjs = data?.objects || data?.detections;
-            if (rawObjs && Array.isArray(rawObjs)) {
-              setDetections(rawObjs);
-              setAiStats({
-                fps: data.ai_fps || 25,
-                latency: data.latency_ms || 18,
-                objects: rawObjs.length,
-              });
-            }
+            const rawObjs = data?.objects || data?.detections || [];
+            setDetections(rawObjs);
+            setDetectionState(rawObjs.length > 0 ? 'DETECTION_FOUND' : 'NO_DETECTION');
+            setAiStats({
+              fps: data.ai_fps || 25,
+              latency: data.latency_ms || 18,
+              objects: rawObjs.length,
+            });
           } catch {
-            // ignore malformed frame
+            // ignore parse error
           }
         };
 
         ws.onclose = () => {
           if (isMounted) {
+            setDetectionState('ANALYZING');
             reconnectTimeout = window.setTimeout(connectWs, 3000);
+          }
+        };
+
+        ws.onerror = () => {
+          if (isMounted) {
+            setDetectionState('ERROR');
           }
         };
       } catch {
         if (isMounted) {
+          setDetectionState('ERROR');
           reconnectTimeout = window.setTimeout(connectWs, 3000);
         }
       }
@@ -181,7 +197,7 @@ export const DetectionOverlay: React.FC<DetectionOverlayProps> = ({
     };
   }, [cameraId, isEnabled, customDetections]);
 
-  if (!isEnabled || detections.length === 0) {
+  if (!isEnabled) {
     return null;
   }
 
@@ -250,21 +266,67 @@ export const DetectionOverlay: React.FC<DetectionOverlayProps> = ({
 
   return (
     <div className="phantom-ai-detection-overlay">
-      {/* Top HUD Telemetry Banner */}
+      {/* Top HUD Telemetry Banner & Detection Ring Indicator */}
       <div className="phantom-hud-status-strip">
         <span
           style={{
-            display: 'inline-block',
-            width: '6px',
-            height: '6px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '12px',
+            height: '12px',
             borderRadius: '50%',
-            backgroundColor: '#34d399',
-            boxShadow: '0 0 6px #34d399',
+            border: `2px solid ${
+              detectionState === 'DETECTION_FOUND'
+                ? '#10b981'
+                : detectionState === 'NO_DETECTION'
+                ? '#06b6d4'
+                : detectionState === 'ANALYZING'
+                ? '#38bdf8'
+                : '#ef4444'
+            }`,
+            backgroundColor:
+              detectionState === 'DETECTION_FOUND'
+                ? 'rgba(16, 185, 129, 0.3)'
+                : detectionState === 'NO_DETECTION'
+                ? 'rgba(6, 182, 212, 0.2)'
+                : 'transparent',
           }}
-        />
-        <span>YOLO26 HIERARCHICAL AI</span>
+        >
+          {detectionState === 'ANALYZING' && (
+            <span
+              style={{
+                width: '6px',
+                height: '6px',
+                border: '1.5px solid #38bdf8',
+                borderTopColor: 'transparent',
+                borderRadius: '50%',
+                animation: 'spin 1s linear infinite',
+              }}
+            />
+          )}
+          {detectionState === 'DETECTION_FOUND' && (
+            <span
+              style={{
+                width: '4px',
+                height: '4px',
+                borderRadius: '50%',
+                backgroundColor: '#10b981',
+              }}
+            />
+          )}
+        </span>
+        <span>YOLO26 AI</span>
         <span style={{ color: '#64748b' }}>|</span>
-        <span>{aiStats.objects} ACTIVE TRACKS</span>
+        <span style={{ color: detectionState === 'DETECTION_FOUND' ? '#34d399' : '#94a3b8' }}>
+          {detectionState === 'DETECTION_FOUND'
+            ? `${aiStats.objects} OBJECTS DETECTED`
+            : detectionState === 'NO_DETECTION'
+            ? 'NO OBJECTS IN VIEW'
+            : detectionState === 'ANALYZING'
+            ? 'ANALYZING SCENE...'
+            : 'AI OFFLINE'}
+        </span>
         <span style={{ color: '#64748b' }}>|</span>
         <span>{aiStats.fps} FPS</span>
       </div>

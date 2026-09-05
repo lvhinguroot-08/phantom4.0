@@ -24,6 +24,7 @@ from .hierarchy import (
     VisionTaxonomy,
 )
 from .temporal_fusion import TemporalTrackFusionEngine
+from .bytetrack import BYTETracker, STrack
 
 
 def _safe_float(val: Any, default: float = 0.0) -> float:
@@ -78,6 +79,19 @@ def compute_iou(box1: Any, box2: Any) -> float:
     if union <= 0.0:
         return 0.0
     return intersection / union
+
+
+def format_display_label(
+    object_class: str,
+    track_id: Optional[int] = None,
+    confidence: float = 0.0,
+) -> str:
+    """Format standard display label, e.g., 'Person #12 | 96%'."""
+    cat_disp = (object_class or "OBJECT").replace("_", " ").title()
+    track_str = f" #{track_id}" if track_id is not None else ""
+    pct = int(round(_safe_float(confidence) * 100))
+    return f"{cat_disp}{track_str} | {pct}%"
+
 
 
 class Track:
@@ -217,15 +231,18 @@ class Track:
 
 class YOLO26Tracker:
     """
-    Multi-Object Tracker with Temporal Fusion, Hardware PTS timing,
-    and label hysteresis.
+    Production Multi-Object Tracker powered by ByteTrack:
+    - 2D Bounding Box Kalman Filter for motion prediction across frame drops
+    - Two-stage association (high-confidence detection matching + low-confidence occlusion recovery)
+    - Hardware PTS timing & scene cut / feed loop detection
+    - Temporal classification stabilization & label hysteresis
     """
 
     def __init__(
         self,
         camera_id: str = "CAM-GLOBAL",
         iou_threshold: float = 0.30,
-        max_lost_frames: int = 20,
+        max_lost_frames: int = 30,
         entry_line_y_ratio: float = 0.40,
         exit_line_y_ratio: float = 0.75,
     ):
@@ -240,6 +257,13 @@ class YOLO26Tracker:
         self.frame_count: int = 0
         self.fusion_engine: TemporalTrackFusionEngine = TemporalTrackFusionEngine(camera_id=camera_id)
 
+        # ByteTrack Core
+        self.bytetracker: BYTETracker = BYTETracker(
+            track_thresh=0.50,
+            track_buffer=self.max_lost_frames,
+            match_thresh=0.70,
+        )
+
         # Discontinuity & PTS tracking
         self.last_pts_msec: Optional[float] = None
         self.discontinuity_count: int = 0
@@ -251,6 +275,7 @@ class YOLO26Tracker:
         self.frame_count = 0
         self.last_pts_msec = None
         self.fusion_engine.reset()
+        self.bytetracker.reset()
 
     def check_and_handle_discontinuity(self, pts_msec: Optional[float]) -> bool:
         """Detects video loops or hard scene cuts."""
@@ -262,10 +287,11 @@ class YOLO26Tracker:
             self.discontinuity_count += 1
             logger.info(
                 f"[{self.camera_id}] Scene cut / feed loop detected (ΔPTS={delta:.1f}ms). "
-                f"Reconciling {len(self.tracks)} active tracks."
+                f"Reconciling active tracks."
             )
             self.tracks.clear()
             self.fusion_engine.reset()
+            self.bytetracker.reset()
             return True
         return False
 
@@ -277,8 +303,8 @@ class YOLO26Tracker:
         pts_msec: Optional[float] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Associate detections with existing tracks, assign persistent track IDs,
-        and apply multi-frame temporal classification fusion.
+        Associate detections with existing tracks using ByteTrack two-stage Kalman matching,
+        assign persistent track IDs, and apply multi-frame temporal classification stabilization.
         """
         now_dt = timestamp or datetime.now(timezone.utc)
         self.frame_count += 1
@@ -287,67 +313,51 @@ class YOLO26Tracker:
         if pts_msec is not None:
             self.last_pts_msec = pts_msec
 
-        active_track_ids = list(self.tracks.keys())
-        matched_tracks: Set[int] = set()
-        matched_dets: Set[int] = set()
+        # 1. ByteTrack Two-Stage Association with Kalman Motion Prediction
+        active_stracks = self.bytetracker.update(detections)
+        tracked_results: List[Dict[str, Any]] = []
+        active_track_ids: Set[int] = set()
 
-        vehicle_classes = {
-            "CAR", "TRUCK", "BUS", "MOTORCYCLE", "TWO_WHEELER",
-            "VEHICLE", "VAN", "AUTO_RICKSHAW", "BICYCLE", "OTHER_VEHICLE"
-        }
+        for strack in active_stracks:
+            tid = strack.track_id
+            active_track_ids.add(tid)
+            raw_det = dict(strack.raw_det) if strack.raw_det else {}
+            box_dict = strack.to_dict()["bbox"]
+            obj_class = strack.object_class
+            conf = strack.score
 
-        # Candidate assignment matching based on IoU
-        candidates: List[Tuple[float, int, int]] = []
-        for det_idx, det in enumerate(detections):
-            bbox = det.get("bounding_box") or det.get("bbox") or {}
-            obj_class = (det.get("object_class") or det.get("class_name") or "OBJECT").upper()
-
-            for tid in active_track_ids:
+            if tid in self.tracks:
                 track = self.tracks[tid]
-                if track.object_class != obj_class:
-                    if not (track.object_class in vehicle_classes and obj_class in vehicle_classes):
-                        continue
+                track.update(box_dict, conf, timestamp=now_dt, pts_msec=pts_msec)
+            else:
+                track = Track(
+                    track_id=tid,
+                    camera_id=self.camera_id,
+                    bbox=box_dict,
+                    obj_class=obj_class,
+                    conf=conf,
+                    timestamp=now_dt,
+                    pts_msec=pts_msec,
+                )
+                self.tracks[tid] = track
 
-                iou = compute_iou(bbox, track.bbox)
-                if iou >= self.iou_threshold:
-                    candidates.append((iou, det_idx, tid))
-
-        candidates.sort(key=lambda x: x[0], reverse=True)
-
-        # 1. Update matched existing tracks
-        for iou, det_idx, tid in candidates:
-            if det_idx in matched_dets or tid in matched_tracks:
-                continue
-
-            det = detections[det_idx]
-            bbox = det.get("bounding_box") or det.get("bbox") or {}
-            obj_class = (det.get("object_class") or det.get("class_name") or "OBJECT").upper()
-            conf = _safe_float(det.get("confidence"), 0.0)
-
-            track = self.tracks[tid]
-            track.update(bbox, conf, timestamp=now_dt, pts_msec=pts_msec)
-
-            matched_tracks.add(tid)
-            matched_dets.add(det_idx)
-
-            # Temporal classification fusion
-            raw_res = det.get("hierarchical_result")
+            # 2. Temporal Classification Stabilization (Confidence-Weighted History & Hysteresis)
+            raw_res = raw_det.get("hierarchical_result")
             if not isinstance(raw_res, HierarchicalClassificationResult):
                 raw_res = HierarchicalClassificationResult(
                     category=obj_class,
                     category_confidence=conf,
-                    subtype=det.get("attributes", {}).get("structure_type"),
-                    make=det.get("attributes", {}).get("make"),
-                    model=det.get("attributes", {}).get("model"),
-                    model_confidence=conf if det.get("attributes", {}).get("model") else None,
-                    classification_status=ClassificationStatus.CONFIDENT if conf >= 0.78 else ClassificationStatus.LIKELY,
-                    is_hard_negative=det.get("is_hard_negative", False),
-                    rejection_reason=det.get("rejection_reason"),
+                    subtype=raw_det.get("attributes", {}).get("structure_type"),
+                    make=raw_det.get("attributes", {}).get("make"),
+                    model=raw_det.get("attributes", {}).get("model"),
+                    model_confidence=conf if raw_det.get("attributes", {}).get("model") else None,
+                    classification_status=ClassificationStatus.CONFIDENT if conf >= 0.75 else ClassificationStatus.LIKELY,
+                    is_hard_negative=raw_det.get("is_hard_negative", False),
+                    rejection_reason=raw_det.get("rejection_reason"),
                 )
 
             fused_res, lifecycle = self.fusion_engine.fuse_track_detection(tid, raw_res, timestamp=now_dt)
 
-            # Apply fused properties to track
             track.object_class = fused_res.category
             track.confidence = fused_res.category_confidence
             track.subtype = fused_res.subtype
@@ -366,116 +376,38 @@ class YOLO26Tracker:
             )
             track.is_hard_negative = fused_res.is_hard_negative
 
-            # Populate detection payload
-            det["track_id"] = tid
-            det["camera_id"] = self.camera_id
-            det["object_class"] = fused_res.category
-            det["class_name"] = fused_res.category.lower()
-            det["confidence"] = fused_res.category_confidence
-            det["first_seen"] = track.first_seen
-            det["last_seen"] = track.last_seen
-            det["dwell_time"] = track.dwell_time
-            det["movement_direction"] = track.movement_direction
-            det["speed_kmph"] = track.speed_kmph
-            det["classification_status"] = fused_res.classification_status.value
-            det["event_lifecycle"] = lifecycle.value
-            det["display_label"] = track.display_label
-            det["is_hard_negative"] = fused_res.is_hard_negative
-            if "attributes" in det and isinstance(det["attributes"], dict):
-                if fused_res.make:
-                    det["attributes"]["make"] = fused_res.make
-                if fused_res.model:
-                    det["attributes"]["model"] = fused_res.model
-                    det["attributes"]["display_name"] = f"{fused_res.make or ''} {fused_res.model}".strip()
-                det["attributes"]["classification_status"] = fused_res.classification_status.value
+            # Populate track data model complying with Step 10
+            res_det = {
+                "track_id": tid,
+                "camera_id": self.camera_id,
+                "object_class": fused_res.category,
+                "class_name": fused_res.category.lower(),
+                "confidence": fused_res.category_confidence,
+                "detection_confidence": conf,
+                "bbox": track.bbox,
+                "bounding_box": track.bbox,
+                "first_seen": track.first_seen,
+                "last_seen": track.last_seen,
+                "dwell_time": track.dwell_time,
+                "movement_direction": track.movement_direction,
+                "speed_kmph": track.speed_kmph,
+                "tracking_state": strack.state.name,
+                "track_age": strack.tracklet_len,
+                "classification_status": fused_res.classification_status.value,
+                "event_lifecycle": lifecycle.value,
+                "display_label": track.display_label,
+                "is_hard_negative": fused_res.is_hard_negative,
+                "hierarchical_result": fused_res,
+                "attributes": raw_det.get("attributes", {}),
+            }
+            tracked_results.append(res_det)
 
-        # 2. Register new tracks for unmatched detections
-        for det_idx, det in enumerate(detections):
-            if det_idx not in matched_dets:
-                bbox = det.get("bounding_box") or det.get("bbox") or {}
-                obj_class = (det.get("object_class") or det.get("class_name") or "OBJECT").upper()
-                conf = _safe_float(det.get("confidence"), 0.0)
-
-                tid = self._next_track_id
-                self._next_track_id += 1
-
-                new_track = Track(
-                    track_id=tid,
-                    camera_id=self.camera_id,
-                    bbox=bbox,
-                    obj_class=obj_class,
-                    conf=conf,
-                    timestamp=now_dt,
-                    pts_msec=pts_msec,
-                )
-                self.tracks[tid] = new_track
-
-                raw_res = det.get("hierarchical_result")
-                if not isinstance(raw_res, HierarchicalClassificationResult):
-                    raw_res = HierarchicalClassificationResult(
-                        category=obj_class,
-                        category_confidence=conf,
-                        subtype=det.get("attributes", {}).get("structure_type"),
-                        make=det.get("attributes", {}).get("make"),
-                        model=det.get("attributes", {}).get("model"),
-                        model_confidence=conf if det.get("attributes", {}).get("model") else None,
-                        classification_status=ClassificationStatus.CONFIDENT if conf >= 0.78 else ClassificationStatus.LIKELY,
-                        is_hard_negative=det.get("is_hard_negative", False),
-                        rejection_reason=det.get("rejection_reason"),
-                    )
-
-                fused_res, lifecycle = self.fusion_engine.fuse_track_detection(tid, raw_res, timestamp=now_dt)
-
-                new_track.object_class = fused_res.category
-                new_track.confidence = fused_res.category_confidence
-                new_track.subtype = fused_res.subtype
-                new_track.make = fused_res.make
-                new_track.model = fused_res.model
-                new_track.classification_status = fused_res.classification_status
-                new_track.event_lifecycle = lifecycle
-                new_track.display_label = fused_res.display_label or VisionTaxonomy.format_tactical_label(
-                    category=fused_res.category,
-                    subtype=fused_res.subtype,
-                    make=fused_res.make,
-                    model=fused_res.model,
-                    confidence=fused_res.category_confidence,
-                    status=fused_res.classification_status,
-                    track_id=tid,
-                )
-                new_track.is_hard_negative = fused_res.is_hard_negative
-
-                det["track_id"] = tid
-                det["camera_id"] = self.camera_id
-                det["object_class"] = fused_res.category
-                det["class_name"] = fused_res.category.lower()
-                det["confidence"] = fused_res.category_confidence
-                det["first_seen"] = new_track.first_seen
-                det["last_seen"] = new_track.last_seen
-                det["dwell_time"] = 0.0
-                det["movement_direction"] = "STATIONARY"
-                det["speed_kmph"] = 0.0
-                det["classification_status"] = fused_res.classification_status.value
-                det["event_lifecycle"] = lifecycle.value
-                det["display_label"] = new_track.display_label
-                det["is_hard_negative"] = fused_res.is_hard_negative
-                if "attributes" in det and isinstance(det["attributes"], dict):
-                    if fused_res.make:
-                        det["attributes"]["make"] = fused_res.make
-                    if fused_res.model:
-                        det["attributes"]["model"] = fused_res.model
-                        det["attributes"]["display_name"] = f"{fused_res.make or ''} {fused_res.model}".strip()
-                    det["attributes"]["classification_status"] = fused_res.classification_status.value
-
-        # 3. Age unmatched tracks and prune dead ones
-        dead_tracks: List[int] = []
-        for tid, track in self.tracks.items():
-            if tid not in matched_tracks and tid not in [d.get("track_id") for d in detections]:
-                track.frames_since_update += 1
-                if track.frames_since_update > self.max_lost_frames:
-                    dead_tracks.append(tid)
-
-        for tid in dead_tracks:
-            del self.tracks[tid]
+        # 3. Clean up expired tracks
+        for tid in list(self.tracks.keys()):
+            if tid not in active_track_ids:
+                self.tracks[tid].frames_since_update += 1
+                if self.tracks[tid].frames_since_update > self.max_lost_frames:
+                    del self.tracks[tid]
 
         self.fusion_engine.cleanup_lost_tracks(set(self.tracks.keys()))
-        return detections
+        return tracked_results

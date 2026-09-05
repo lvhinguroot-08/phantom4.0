@@ -9,6 +9,7 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.yolo26.schemas import TrafficViolationEvent
 from app.core.logging import logger
 from app.models.alert import Alert
 from app.models.camera import Camera
@@ -97,6 +98,19 @@ class YOLO26AlertService:
         alert_type, severity, title_prefix = self._determine_alert_type_and_severity(
             obj_class, confidence, is_watchlist_match=is_watchlist_match
         )
+
+        # In Phase 1, ordinary traffic object presence is not a violation or alert
+        ordinary_traffic_classes = {
+            "PERSON", "CAR", "MOTORCYCLE", "SCOOTER", "AUTO_RICKSHAW",
+            "BUS", "TRUCK", "LCV_TEMPO", "BICYCLE", "TWO_WHEELER", "OTHER_VEHICLE"
+        }
+        if not is_watchlist_match and not plate_number and not detection_data.get("is_violation", False):
+            if obj_class.upper() in ordinary_traffic_classes:
+                logger.debug(
+                    f"Routine telemetry: {obj_class} (Track {track_id}) on camera {camera.id}; "
+                    f"routine presence is not a violation alert."
+                )
+                return None
 
         # Granular alert key prevents dropping separate vehicles / tracks
         if plate_number:
@@ -222,3 +236,140 @@ class YOLO26AlertService:
             logger.warning(f"Non-fatal event publishing failure for alert {alert_code}: {pub_err}")
 
         return alert_record
+
+    async def process_violation_event(
+        self,
+        session: AsyncSession,
+        *,
+        camera: Camera,
+        violation: TrafficViolationEvent,
+    ) -> Optional[Alert]:
+        """
+        Persists confirmed Phase 2 traffic violation (NO_HELMET, TRIPLE_RIDING) into DB
+        and broadcasts real-time alerts to the police command center dashboard.
+        """
+        # Deduplication check
+        dedupe_key = f"VIOLATION:{violation.violation_type}:{violation.vehicle_track_id}"
+        if violation.rider_track_id is not None:
+            dedupe_key += f":RIDER_{violation.rider_track_id}"
+
+        if self._is_rate_limited(camera.id, dedupe_key):
+            logger.debug(f"Suppressed duplicate violation alert for key '{dedupe_key}' on camera {camera.id}")
+            return None
+
+        now_dt = datetime.now(timezone.utc)
+        alert_code = f"ALT-{now_dt.strftime('%Y%m%d')}-{uuid.uuid4().hex[:8].upper()}"
+        cam_name = getattr(camera, "name", None) or getattr(camera, "camera_code", None) or "SURVEILLANCE-CAM"
+
+        district_name = "Gujarat"
+        if hasattr(camera, "__dict__") and "location" in camera.__dict__ and camera.__dict__["location"]:
+            loc = camera.__dict__["location"]
+            district_name = getattr(loc, "district", "Gujarat") or "Gujarat"
+        elif hasattr(camera, "metadata_") and isinstance(camera.metadata_, dict):
+            district_name = camera.metadata_.get("district", "Gujarat")
+
+        if violation.violation_type == "NO_HELMET":
+            alert_type = "NO_HELMET"
+            severity = violation.severity or "MEDIUM"
+            title = f"TRAFFIC VIOLATION: Helmet Rule Non-Compliance [{cam_name}]"
+            message = (
+                f"Rider #{violation.rider_track_id or 'Unknown'} on {violation.vehicle_type} #{violation.vehicle_track_id} "
+                f"confirmed without helmet at {cam_name} ({district_name}) with {violation.confidence*100:.1f}% confidence."
+            )
+        elif violation.violation_type == "TRIPLE_RIDING":
+            alert_type = "TRIPLE_RIDING"
+            severity = violation.severity or "HIGH"
+            title = f"TRAFFIC VIOLATION: Over-Occupancy (Triple Riding) [{cam_name}]"
+            message = (
+                f"{violation.vehicle_type} #{violation.vehicle_track_id} confirmed carrying {violation.occupant_count} occupants "
+                f"at {cam_name} ({district_name}) with {violation.confidence*100:.1f}% confidence."
+            )
+        else:
+            alert_type = violation.violation_type
+            severity = violation.severity or "MEDIUM"
+            title = f"TRAFFIC VIOLATION: {violation.violation_type} [{cam_name}]"
+            message = f"{violation.violation_type} detected on camera {cam_name} ({district_name})."
+
+        metadata = {
+            "origin": "PHANTOM_VIOLATION_ENGINE",
+            "violation_type": violation.violation_type,
+            "camera_id": str(camera.id),
+            "camera_name": cam_name,
+            "district": district_name,
+            "vehicle_track_id": violation.vehicle_track_id,
+            "vehicle_type": violation.vehicle_type,
+            "person_track_ids": violation.person_track_ids,
+            "rider_track_id": violation.rider_track_id,
+            "helmet_state": violation.helmet_state,
+            "occupant_count": violation.occupant_count,
+            "confidence": violation.confidence,
+            "evidence_reference": violation.evidence_reference,
+            "status": violation.status,
+            "detected_at": now_dt.isoformat(),
+            **violation.metadata,
+        }
+
+        resolved_cam_uuid = camera.id if isinstance(camera.id, uuid.UUID) else uuid.UUID(str(camera.id))
+
+        alert_record = Alert(
+            id=uuid.uuid4(),
+            alert_code=alert_code,
+            alert_type=alert_type,
+            severity=severity,
+            title=title,
+            message=message,
+            status="NEW",
+            camera_id=resolved_cam_uuid,
+            metadata_=metadata,
+            created_at=now_dt,
+            updated_at=now_dt,
+        )
+
+        session.add(alert_record)
+        await session.flush()
+
+        logger.info(f"Generated Traffic Violation Alert [{alert_code}] {alert_type} ({severity}) on camera {resolved_cam_uuid}")
+
+        event_payload = {
+            "alert_id": str(alert_record.id),
+            "alert_code": alert_code,
+            "event_id": str(uuid.uuid4()),
+            "title": title,
+            "message": message,
+            "severity": severity,
+            "alert_type": alert_type,
+            "camera_id": str(resolved_cam_uuid),
+            "camera_name": cam_name,
+            "district": district_name,
+            "vehicle_track_id": violation.vehicle_track_id,
+            "vehicle_type": violation.vehicle_type,
+            "occupant_count": violation.occupant_count,
+            "rider_track_id": violation.rider_track_id,
+            "confidence": violation.confidence,
+            "evidence_url": violation.evidence_reference,
+            "timestamp": now_dt.isoformat(),
+            "created_at": now_dt.isoformat(),
+        }
+
+        try:
+            await event_publisher.publish(
+                event_name=EventType.ALERT_CREATED,
+                payload=event_payload,
+                camera_id=str(resolved_cam_uuid),
+                district=district_name,
+                severity=severity,
+                source="phantom-violation-engine",
+            )
+            await event_publisher.publish(
+                event_name=alert_type,
+                payload=event_payload,
+                camera_id=str(resolved_cam_uuid),
+                district=district_name,
+                severity=severity,
+                source="phantom-violation-engine",
+            )
+        except Exception as pub_err:
+            logger.warning(f"Non-fatal event publishing failure for violation {alert_code}: {pub_err}")
+
+        return alert_record
+

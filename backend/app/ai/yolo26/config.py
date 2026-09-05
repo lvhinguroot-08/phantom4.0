@@ -75,19 +75,35 @@ class YOLO26Config:
     target_classes: List[str] = field(default_factory=lambda: _parse_classes_env(
         os.getenv("YOLO_TARGET_CLASSES") or os.getenv("YOLO26_TARGET_CLASSES"),
         [
-            "PERSON",
             "CAR",
+            "AUTO_RICKSHAW",
             "MOTORCYCLE",
+            "SCOOTER",
             "BUS",
             "TRUCK",
+            "LCV_TEMPO",
             "BICYCLE",
-            "OTHER_VEHICLE",
+            "PERSON",
             "LICENSE_PLATE",
         ],
     ))
 
     enable_tracking: bool = field(default_factory=lambda: (
         (os.getenv("YOLO_ENABLE_TRACKING") or os.getenv("YOLO26_ENABLE_TRACKING") or "true").lower() in ("true", "1")
+    ))
+
+    # ByteTrack Configuration (Phase 1)
+    track_high_thresh: float = field(default_factory=lambda: float(
+        os.getenv("YOLO_TRACK_HIGH_THRESH", "0.50")
+    ))
+    track_low_thresh: float = field(default_factory=lambda: float(
+        os.getenv("YOLO_TRACK_LOW_THRESH", "0.15")
+    ))
+    track_buffer: int = field(default_factory=lambda: int(
+        os.getenv("YOLO_TRACK_BUFFER", "30")
+    ))
+    match_thresh: float = field(default_factory=lambda: float(
+        os.getenv("YOLO_MATCH_THRESH", "0.70")
     ))
 
     sample_fps: float = field(default_factory=lambda: float(
@@ -97,4 +113,55 @@ class YOLO26Config:
         or "2.0"
     ))
 
+    # Phase 2 Traffic Violation & Helmet Configuration
+    helmet_model_path: Optional[str] = field(default_factory=lambda: (
+        os.getenv("HELMET_MODEL_PATH")
+        or os.getenv("YOLO_HELMET_MODEL_PATH")
+    ))
+    helmet_min_confidence: float = field(default_factory=lambda: float(
+        os.getenv("HELMET_MIN_CONFIDENCE", "0.55")
+    ))
+    no_helmet_confirmation_window: int = field(default_factory=lambda: int(
+        os.getenv("NO_HELMET_CONFIRMATION_WINDOW", "5")
+    ))
+    triple_riding_confirmation_window: int = field(default_factory=lambda: int(
+        os.getenv("TRIPLE_RIDING_CONFIRMATION_WINDOW", "5")
+    ))
+    min_association_confidence: float = field(default_factory=lambda: float(
+        os.getenv("MIN_ASSOCIATION_CONFIDENCE", "0.45")
+    ))
+    track_min_age: int = field(default_factory=lambda: int(
+        os.getenv("TRACK_MIN_AGE", "3")
+    ))
+    violation_cooldown_seconds: int = field(default_factory=lambda: int(
+        os.getenv("VIOLATION_COOLDOWN_SECONDS", "60")
+    ))
+    evidence_output_dir: str = field(default_factory=lambda: (
+        os.getenv("EVIDENCE_OUTPUT_DIR", "static/evidence")
+    ))
+
+    # Phase 3 ANPR & License Plate Intelligence Configuration
+    plate_model_path: Optional[str] = field(default_factory=lambda: (
+        os.getenv("PLATE_MODEL_PATH")
+        or os.getenv("YOLO_PLATE_MODEL_PATH")
+        or os.getenv("ANPR_MODEL_PATH")
+    ))
+    anpr_min_ocr_confidence: float = field(default_factory=lambda: float(
+        os.getenv("ANPR_MIN_OCR_CONFIDENCE", "0.50")
+    ))
+    anpr_temporal_window: int = field(default_factory=lambda: int(
+        os.getenv("ANPR_TEMPORAL_WINDOW", "8")
+    ))
+    anpr_min_confirmations: int = field(default_factory=lambda: int(
+        os.getenv("ANPR_MIN_CONFIRMATIONS", "3")
+    ))
+    anpr_cooldown_seconds: int = field(default_factory=lambda: int(
+        os.getenv("ANPR_COOLDOWN_SECONDS", "60")
+    ))
+    enable_perspective_correction: bool = field(default_factory=lambda: (
+        (os.getenv("ANPR_ENABLE_PERSPECTIVE", "true")).lower() in ("true", "1")
+    ))
+
     demo_fallback_enabled: bool = True
+
+

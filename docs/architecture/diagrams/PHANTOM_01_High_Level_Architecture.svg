@@ -1,0 +1,236 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1380 760" width="100%" height="100%" style="background:#090414; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0F0624" />
+      <stop offset="50%" stop-color="#160A36" />
+      <stop offset="100%" stop-color="#090317" />
+    </linearGradient>
+    <linearGradient id="purpleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#9333EA" />
+      <stop offset="100%" stop-color="#6B21A8" />
+    </linearGradient>
+    <linearGradient id="cardGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1A0D3B" />
+      <stop offset="100%" stop-color="#120729" />
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="5" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="6" stdDeviation="5" flood-color="#000000" flood-opacity="0.6" />
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 8 5 L 0 9 z" fill="#C084FC" />
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 8 5 L 0 9 z" fill="#10B981" />
+    </marker>
+    <marker id="arrow-red" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 8 5 L 0 9 z" fill="#EF4444" />
+    </marker>
+  </defs>
+
+  <!-- Background Canvas -->
+  <rect width="1380" height="760" fill="url(#bgGrad)" />
+  
+  <!-- Subtle Grid Lines -->
+  <g opacity="0.04" stroke="#A855F7" stroke-width="1">
+    <line x1="0" y1="0" x2="0" y2="760" /><line x1="40" y1="0" x2="40" y2="760" /><line x1="80" y1="0" x2="80" y2="760" /><line x1="120" y1="0" x2="120" y2="760" /><line x1="160" y1="0" x2="160" y2="760" /><line x1="200" y1="0" x2="200" y2="760" /><line x1="240" y1="0" x2="240" y2="760" /><line x1="280" y1="0" x2="280" y2="760" /><line x1="320" y1="0" x2="320" y2="760" /><line x1="360" y1="0" x2="360" y2="760" /><line x1="400" y1="0" x2="400" y2="760" /><line x1="440" y1="0" x2="440" y2="760" /><line x1="480" y1="0" x2="480" y2="760" /><line x1="520" y1="0" x2="520" y2="760" /><line x1="560" y1="0" x2="560" y2="760" /><line x1="600" y1="0" x2="600" y2="760" /><line x1="640" y1="0" x2="640" y2="760" /><line x1="680" y1="0" x2="680" y2="760" /><line x1="720" y1="0" x2="720" y2="760" /><line x1="760" y1="0" x2="760" y2="760" /><line x1="800" y1="0" x2="800" y2="760" /><line x1="840" y1="0" x2="840" y2="760" /><line x1="880" y1="0" x2="880" y2="760" /><line x1="920" y1="0" x2="920" y2="760" /><line x1="960" y1="0" x2="960" y2="760" /><line x1="1000" y1="0" x2="1000" y2="760" /><line x1="1040" y1="0" x2="1040" y2="760" /><line x1="1080" y1="0" x2="1080" y2="760" /><line x1="1120" y1="0" x2="1120" y2="760" /><line x1="1160" y1="0" x2="1160" y2="760" /><line x1="1200" y1="0" x2="1200" y2="760" /><line x1="1240" y1="0" x2="1240" y2="760" /><line x1="1280" y1="0" x2="1280" y2="760" /><line x1="1320" y1="0" x2="1320" y2="760" /><line x1="1360" y1="0" x2="1360" y2="760" />
+    <line x1="0" y1="0" x2="1380" y2="0" /><line x1="0" y1="40" x2="1380" y2="40" /><line x1="0" y1="80" x2="1380" y2="80" /><line x1="0" y1="120" x2="1380" y2="120" /><line x1="0" y1="160" x2="1380" y2="160" /><line x1="0" y1="200" x2="1380" y2="200" /><line x1="0" y1="240" x2="1380" y2="240" /><line x1="0" y1="280" x2="1380" y2="280" /><line x1="0" y1="320" x2="1380" y2="320" /><line x1="0" y1="360" x2="1380" y2="360" /><line x1="0" y1="400" x2="1380" y2="400" /><line x1="0" y1="440" x2="1380" y2="440" /><line x1="0" y1="480" x2="1380" y2="480" /><line x1="0" y1="520" x2="1380" y2="520" /><line x1="0" y1="560" x2="1380" y2="560" /><line x1="0" y1="600" x2="1380" y2="600" /><line x1="0" y1="640" x2="1380" y2="640" /><line x1="0" y1="680" x2="1380" y2="680" /><line x1="0" y1="720" x2="1380" y2="720" />
+  </g>
+
+  <!-- Header Banner -->
+  <g transform="translate(40, 30)">
+    <rect x="0" y="0" width="120" height="24" rx="12" fill="#9333EA" fill-opacity="0.25" stroke="#C084FC" stroke-width="1" />
+    <text x="60" y="16" fill="#C084FC" font-size="10" font-weight="700" text-anchor="middle" letter-spacing="1.5">PHANTOM 4.8</text>
+    
+    <text x="135" y="18" fill="#F5F3FF" font-size="20" font-weight="800" letter-spacing="0.5">PHANTOM // Complete High-Level System Architecture</text>
+    <text x="135" y="40" fill="#A78BFA" font-size="12" font-weight="400">7-Layer Architecture: Ingestion -&gt; AI Vision -&gt; Gateway -&gt; Core Services -&gt; GIS -&gt; Copilot -&gt; Storage &amp; RBAC</text>
+
+    <!-- Gujarat Police Netram Tag -->
+    <g transform="translate(1040, 0)">
+      <rect x="0" y="0" width="220" height="34" rx="6" fill="#180C33" stroke="#4C1D95" stroke-width="1" />
+      <circle cx="18" cy="17" r="5" fill="#10B981" filter="url(#glow)" />
+      <text x="34" y="21" fill="#F5F3FF" font-size="11" font-weight="600">GUJARAT POLICE NETRAM C2</text>
+    </g>
+  </g>
+
+  <!-- Main Diagram Body -->
+  <g transform="translate(40, 95)">
+    
+    <!-- Layer A: Video Ingestion -->
+    <g transform="translate(0, 0)" filter="url(#shadow)">
+      <rect width="380" height="310" rx="10" fill="url(#cardGrad)" stroke="#4C1D95" stroke-width="1.5" />
+      <rect x="15" y="15" width="350" height="28" rx="5" fill="#24124D" />
+      <text x="25" y="34" fill="#C084FC" font-size="12" font-weight="700">LAYER A: VIDEO INGESTION &amp; EDGE TRANSPORT</text>
+      
+      <g transform="translate(15, 55)">
+        <rect width="350" height="42" rx="6" fill="#130826" stroke="#4C1D95" stroke-width="1"/>
+        <text x="15" y="24" fill="#F5F3FF" font-size="12" font-weight="600">Sentinel Dynamic Catalogue (/api/ingest)</text>
+        <text x="15" y="37" fill="#A78BFA" font-size="10">Corp8SourceAdapter • 30+ Cameras Auto-Discovery</text>
+      </g>
+      <g transform="translate(15, 105)">
+        <rect width="350" height="42" rx="6" fill="#130826" stroke="#4C1D95" stroke-width="1"/>
+        <text x="15" y="24" fill="#F5F3FF" font-size="12" font-weight="600">RTSP over TCP Transport Engine</text>
+        <text x="15" y="37" fill="#A78BFA" font-size="10">OpenCV TCP Flags • Zero UDP Packet Loss</text>
+      </g>
+      <g transform="translate(15, 155)">
+        <rect width="350" height="42" rx="6" fill="#130826" stroke="#4C1D95" stroke-width="1"/>
+        <text x="15" y="24" fill="#F5F3FF" font-size="12" font-weight="600">Dual-Codec Ingestion (H.264 / H.265 HEVC)</text>
+        <text x="15" y="37" fill="#A78BFA" font-size="10">Hardware PTS Delta • Reconnect Backoff (2s-30s)</text>
+      </g>
+      <g transform="translate(15, 205)">
+        <rect width="350" height="42" rx="6" fill="#130826" stroke="#10B981" stroke-width="1"/>
+        <text x="15" y="24" fill="#10B981" font-size="12" font-weight="600">1-Slot Latest Frame Decoupled Ring Buffer</text>
+        <text x="15" y="37" fill="#A78BFA" font-size="10">Independent Capture/Worker Threads • Zero Lag</text>
+      </g>
+    </g>
+
+    <!-- Layer B: AI Vision Engine -->
+    <g transform="translate(420, 0)" filter="url(#shadow)">
+      <rect width="460" height="310" rx="10" fill="url(#cardGrad)" stroke="#4C1D95" stroke-width="1.5" />
+      <rect x="15" y="15" width="430" height="28" rx="5" fill="#24124D" />
+      <text x="25" y="34" fill="#C084FC" font-size="12" font-weight="700">LAYER B: COMPUTER VISION &amp; AI INFERENCE</text>
+      
+      <g transform="translate(15, 55)">
+        <rect width="430" height="42" rx="6" fill="#130826" stroke="#7C3AED" stroke-width="1"/>
+        <text x="15" y="24" fill="#F5F3FF" font-size="12" font-weight="600">Shared YOLO26 Detector Backbone (yolov8n.pt)</text>
+        <text x="15" y="37" fill="#A78BFA" font-size="10">CUDA Acceleration • Multi-Stream Batching • 14-22ms Latency</text>
+      </g>
+      <g transform="translate(15, 105)">
+        <rect width="430" height="42" rx="6" fill="#130826" stroke="#7C3AED" stroke-width="1"/>
+        <text x="15" y="24" fill="#F5F3FF" font-size="12" font-weight="600">3-Tier Classification Hierarchy (L1 / L2 / L3)</text>
+        <text x="15" y="37" fill="#A78BFA" font-size="10">Category -&gt; Subtype -&gt; Make/Model Resolution</text>
+      </g>
+      <g transform="translate(15, 155)">
+        <rect width="430" height="42" rx="6" fill="#130826" stroke="#7C3AED" stroke-width="1"/>
+        <text x="15" y="24" fill="#F5F3FF" font-size="12" font-weight="600">Specialized Indian Traffic Classifiers &amp; Filters</text>
+        <text x="15" y="37" fill="#A78BFA" font-size="10">Activa/Splendor • WagonR/Swift • Auto Disambiguator • Pole Filter</text>
+      </g>
+      <g transform="translate(15, 205)">
+        <rect width="430" height="42" rx="6" fill="#130826" stroke="#06B6D4" stroke-width="1"/>
+        <text x="15" y="24" fill="#06B6D4" font-size="12" font-weight="600">Gujarat ANPR OCR Engine (EasyOCR + Normalizer)</text>
+        <text x="15" y="37" fill="#A78BFA" font-size="10">GJ01-GJ38 RTO Parser • Bharat Series (22BH) • Bilateral Warp</text>
+      </g>
+    </g>
+
+    <!-- Layer C & D: Core Services -->
+    <g transform="translate(920, 0)" filter="url(#shadow)">
+      <rect width="400" height="310" rx="10" fill="url(#cardGrad)" stroke="#4C1D95" stroke-width="1.5" />
+      <rect x="15" y="15" width="370" height="28" rx="5" fill="#24124D" />
+      <text x="25" y="34" fill="#C084FC" font-size="12" font-weight="700">LAYER C &amp; D: GATEWAY, ALERTS &amp; CORE API</text>
+      
+      <g transform="translate(15, 55)">
+        <rect width="370" height="42" rx="6" fill="#130826" stroke="#4C1D95" stroke-width="1"/>
+        <text x="15" y="24" fill="#F5F3FF" font-size="12" font-weight="600">StreamGateway (WHEP / WebRTC / HLS)</text>
+        <text x="15" y="37" fill="#A78BFA" font-size="10">Profile Manager: LOW, MED, HIGH, BURST_TRACKING</text>
+      </g>
+      <g transform="translate(15, 105)">
+        <rect width="370" height="42" rx="6" fill="#130826" stroke="#EF4444" stroke-width="1"/>
+        <text x="15" y="24" fill="#EF4444" font-size="12" font-weight="600">Alert Engine &amp; 60s Deduplication Cooldown</text>
+        <text x="15" y="37" fill="#A78BFA" font-size="10">Severity Scoring (CRITICAL, HIGH, MED, LOW) • Anti-Storm</text>
+      </g>
+      <g transform="translate(15, 155)">
+        <rect width="370" height="42" rx="6" fill="#130826" stroke="#4C1D95" stroke-width="1"/>
+        <text x="15" y="24" fill="#F5F3FF" font-size="12" font-weight="600">Incident Lifecycle &amp; Dossier Forensics</text>
+        <text x="15" y="37" fill="#A78BFA" font-size="10">SHA-256 Evidence Hashing • Multi-Camera Sighting Graph</text>
+      </g>
+      <g transform="translate(15, 205)">
+        <rect width="370" height="42" rx="6" fill="#130826" stroke="#4C1D95" stroke-width="1"/>
+        <text x="15" y="24" fill="#F5F3FF" font-size="12" font-weight="600">FastAPI v1 Core Application Layer (23 Routers)</text>
+        <text x="15" y="37" fill="#A78BFA" font-size="10">Async Controllers • Pydantic v2 • WebSocket HUD Bus</text>
+      </g>
+    </g>
+
+    <!-- Connector Lines Layer A -> B -> C/D -->
+    <path d="M 380 155 L 420 155" stroke="#C084FC" stroke-width="2" marker-end="url(#arrow)" />
+    <path d="M 880 155 L 920 155" stroke="#C084FC" stroke-width="2" marker-end="url(#arrow)" />
+
+    <!-- Bottom Half: Layers E, F, G & Security -->
+    <!-- Layer E: GIS Spatial -->
+    <g transform="translate(0, 340)" filter="url(#shadow)">
+      <rect width="420" height="340" rx="10" fill="url(#cardGrad)" stroke="#4C1D95" stroke-width="1.5" />
+      <rect x="15" y="15" width="390" height="28" rx="5" fill="#24124D" />
+      <text x="25" y="34" fill="#C084FC" font-size="12" font-weight="700">LAYER E: SPATIAL INTELLIGENCE &amp; GIS MAP</text>
+
+      <g transform="translate(15, 55)">
+        <rect width="390" height="50" rx="6" fill="#130826" stroke="#4C1D95" stroke-width="1"/>
+        <text x="15" y="22" fill="#F5F3FF" font-size="12" font-weight="600">CCTV Coverage Wedge Geometry Calculation</text>
+        <text x="15" y="38" fill="#A78BFA" font-size="10">Trigonometric Wedge: Heading (θ), FOV (α), Range (d)</text>
+      </g>
+      <g transform="translate(15, 115)">
+        <rect width="390" height="50" rx="6" fill="#130826" stroke="#4C1D95" stroke-width="1"/>
+        <text x="15" y="22" fill="#F5F3FF" font-size="12" font-weight="600">Multi-Camera Trajectory Interception</text>
+        <text x="15" y="38" fill="#A78BFA" font-size="10">Correlates sequential sightings along Gujarat Highway corridors</text>
+      </g>
+      <g transform="translate(15, 175)">
+        <rect width="390" height="50" rx="6" fill="#130826" stroke="#4C1D95" stroke-width="1"/>
+        <text x="15" y="22" fill="#F5F3FF" font-size="12" font-weight="600">District Boundary Filtering (33 Districts)</text>
+        <text x="15" y="38" fill="#A78BFA" font-size="10">Ahmedabad, Surat, Vadodara, Rajkot, Bhavnagar, Junagadh</text>
+      </g>
+      <g transform="translate(15, 235)">
+        <rect width="390" height="50" rx="6" fill="#130826" stroke="#10B981" stroke-width="1"/>
+        <text x="15" y="22" fill="#10B981" font-size="12" font-weight="600">PostGIS Spatial Indexing (GIST geometry)</text>
+        <text x="15" y="38" fill="#A78BFA" font-size="10">Instant sub-10ms spatial point-in-polygon queries</text>
+      </g>
+    </g>
+
+    <!-- Layer F: AI Copilot -->
+    <g transform="translate(450, 340)" filter="url(#shadow)">
+      <rect width="420" height="340" rx="10" fill="url(#cardGrad)" stroke="#4C1D95" stroke-width="1.5" />
+      <rect x="15" y="15" width="390" height="28" rx="5" fill="#24124D" />
+      <text x="25" y="34" fill="#C084FC" font-size="12" font-weight="700">LAYER F: AI COPILOT &amp; AUTONOMOUS AGENT</text>
+
+      <g transform="translate(15, 55)">
+        <rect width="390" height="50" rx="6" fill="#130826" stroke="#7C3AED" stroke-width="1"/>
+        <text x="15" y="22" fill="#F5F3FF" font-size="12" font-weight="600">SurveillanceCopilot Autonomous Agent</text>
+        <text x="15" y="38" fill="#A78BFA" font-size="10">Conversational context memory • Intent routing • Grounded NLP</text>
+      </g>
+      <g transform="translate(15, 115)">
+        <rect width="390" height="50" rx="6" fill="#130826" stroke="#7C3AED" stroke-width="1"/>
+        <text x="15" y="22" fill="#F5F3FF" font-size="12" font-weight="600">Multilingual NLP Parser (EN, HI, GU)</text>
+        <text x="15" y="38" fill="#A78BFA" font-size="10">"Ahmedabad ma ketla camera che?" • Hindi/English intent engine</text>
+      </g>
+      <g transform="translate(15, 175)">
+        <rect width="390" height="50" rx="6" fill="#130826" stroke="#06B6D4" stroke-width="1"/>
+        <text x="15" y="22" fill="#06B6D4" font-size="12" font-weight="600">40+ Grounded Deterministic Surveillance Tools</text>
+        <text x="15" y="38" fill="#A78BFA" font-size="10">Camera stats, ANPR search, live stream, GIS path, dossier export</text>
+      </g>
+      <g transform="translate(15, 235)">
+        <rect width="390" height="50" rx="6" fill="#130826" stroke="#7C3AED" stroke-width="1"/>
+        <text x="15" y="22" fill="#F5F3FF" font-size="12" font-weight="600">Real-Time WebSocket Feedback &amp; UI Action Bus</text>
+        <text x="15" y="38" fill="#A78BFA" font-size="10">Directly pans GIS map, highlights camera cards, triggers live grid</text>
+      </g>
+    </g>
+
+    <!-- Layer G & Security: Governance & Storage -->
+    <g transform="translate(900, 340)" filter="url(#shadow)">
+      <rect width="420" height="340" rx="10" fill="url(#cardGrad)" stroke="#4C1D95" stroke-width="1.5" />
+      <rect x="15" y="15" width="390" height="28" rx="5" fill="#24124D" />
+      <text x="25" y="34" fill="#C084FC" font-size="12" font-weight="700">LAYER G &amp; SECURITY: DATA, RBAC &amp; AUDIT</text>
+
+      <g transform="translate(15, 55)">
+        <rect width="390" height="50" rx="6" fill="#130826" stroke="#10B981" stroke-width="1"/>
+        <text x="15" y="22" fill="#10B981" font-size="12" font-weight="600">PostgreSQL 16 + PostGIS &amp; In-Memory Engine</text>
+        <text x="15" y="38" fill="#A78BFA" font-size="10">Async SQLAlchemy • Connection pooling • SQLite fallback</text>
+      </g>
+      <g transform="translate(15, 115)">
+        <rect width="390" height="50" rx="6" fill="#130826" stroke="#4C1D95" stroke-width="1"/>
+        <text x="15" y="22" fill="#F5F3FF" font-size="12" font-weight="600">7-Role Granular RBAC Matrix</text>
+        <text x="15" y="38" fill="#A78BFA" font-size="10">ADMIN, POLICE_OFFICER, INVESTIGATOR, ANALYST, VIEWER, AUDITOR</text>
+      </g>
+      <g transform="translate(15, 175)">
+        <rect width="390" height="50" rx="6" fill="#130826" stroke="#4C1D95" stroke-width="1"/>
+        <text x="15" y="22" fill="#F5F3FF" font-size="12" font-weight="600">Cryptographic Evidence Verification (SHA-256)</text>
+        <text x="15" y="38" fill="#A78BFA" font-size="10">Sec. 65B Indian Evidence Act certified court-admissible records</text>
+      </g>
+      <g transform="translate(15, 235)">
+        <rect width="390" height="50" rx="6" fill="#130826" stroke="#4C1D95" stroke-width="1"/>
+        <text x="15" y="22" fill="#F5F3FF" font-size="12" font-weight="600">Security Middleware &amp; Audit Trail</text>
+        <text x="15" y="38" fill="#A78BFA" font-size="10">SSRF cloud protection, rate limiting, CSP/HSTS headers, audit logs</text>
+      </g>
+    </g>
+    
+  </g>
+</svg>

@@ -1,0 +1,188 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 820" width="100%" height="100%" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+  
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0E0522" />
+      <stop offset="50%" stop-color="#14092E" />
+      <stop offset="100%" stop-color="#080316" />
+    </linearGradient>
+    <linearGradient id="cardGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1A0D3B" />
+      <stop offset="100%" stop-color="#100624" />
+    </linearGradient>
+    <linearGradient id="headerGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#7C3AED" />
+      <stop offset="100%" stop-color="#4C1D95" />
+    </linearGradient>
+    <linearGradient id="purpleGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#A855F7" />
+      <stop offset="100%" stop-color="#6B21A8" />
+    </linearGradient>
+    <linearGradient id="cyanGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#06B6D4" />
+      <stop offset="100%" stop-color="#0284C7" />
+    </linearGradient>
+    <linearGradient id="greenGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#10B981" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+    <linearGradient id="redGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#EF4444" />
+      <stop offset="100%" stop-color="#B91C1C" />
+    </linearGradient>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="115%">
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000000" flood-opacity="0.65" />
+    </filter>
+    <filter id="subtleGlow" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur stdDeviation="3" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+    <marker id="arr" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#C084FC" />
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#10B981" />
+    </marker>
+    <marker id="arr-cyan" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#06B6D4" />
+    </marker>
+    <marker id="arr-red" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#EF4444" />
+    </marker>
+  </defs>
+
+  <!-- Base Background -->
+  <rect width="860" height="820" fill="url(#bgGrad)" rx="8" />
+  
+  <!-- Precision Technical Grid -->
+  <g opacity="0.03" stroke="#A855F7" stroke-width="1">
+    <line x1="0" y1="0" x2="0" y2="820" /><line x1="40" y1="0" x2="40" y2="820" /><line x1="80" y1="0" x2="80" y2="820" /><line x1="120" y1="0" x2="120" y2="820" /><line x1="160" y1="0" x2="160" y2="820" /><line x1="200" y1="0" x2="200" y2="820" /><line x1="240" y1="0" x2="240" y2="820" /><line x1="280" y1="0" x2="280" y2="820" /><line x1="320" y1="0" x2="320" y2="820" /><line x1="360" y1="0" x2="360" y2="820" /><line x1="400" y1="0" x2="400" y2="820" /><line x1="440" y1="0" x2="440" y2="820" /><line x1="480" y1="0" x2="480" y2="820" /><line x1="520" y1="0" x2="520" y2="820" /><line x1="560" y1="0" x2="560" y2="820" /><line x1="600" y1="0" x2="600" y2="820" /><line x1="640" y1="0" x2="640" y2="820" /><line x1="680" y1="0" x2="680" y2="820" /><line x1="720" y1="0" x2="720" y2="820" /><line x1="760" y1="0" x2="760" y2="820" /><line x1="800" y1="0" x2="800" y2="820" /><line x1="840" y1="0" x2="840" y2="820" />
+    <line x1="0" y1="0" x2="860" y2="0" /><line x1="0" y1="40" x2="860" y2="40" /><line x1="0" y1="80" x2="860" y2="80" /><line x1="0" y1="120" x2="860" y2="120" /><line x1="0" y1="160" x2="860" y2="160" /><line x1="0" y1="200" x2="860" y2="200" /><line x1="0" y1="240" x2="860" y2="240" /><line x1="0" y1="280" x2="860" y2="280" /><line x1="0" y1="320" x2="860" y2="320" /><line x1="0" y1="360" x2="860" y2="360" /><line x1="0" y1="400" x2="860" y2="400" /><line x1="0" y1="440" x2="860" y2="440" /><line x1="0" y1="480" x2="860" y2="480" /><line x1="0" y1="520" x2="860" y2="520" /><line x1="0" y1="560" x2="860" y2="560" /><line x1="0" y1="600" x2="860" y2="600" /><line x1="0" y1="640" x2="860" y2="640" /><line x1="0" y1="680" x2="860" y2="680" /><line x1="0" y1="720" x2="860" y2="720" /><line x1="0" y1="760" x2="860" y2="760" /><line x1="0" y1="800" x2="860" y2="800" />
+  </g>
+  <rect width="860" height="820" fill="none" stroke="#6D28D9" stroke-width="1.5" rx="8" />
+  
+  <!-- Diagram Content -->
+  
+    <!-- Part 1: Trigonometric CCTV Coverage Wedge Model -->
+    <g transform="translate(30, 20)" filter="url(#shadow)">
+      <rect width="800" height="340" rx="8" fill="url(#cardGrad)" stroke="#10B981" stroke-width="1.8" />
+      <rect x="0" y="0" width="800" height="34" rx="8" fill="#0C2618" />
+      <text x="20" y="23" fill="#10B981" font-size="13" font-weight="800">1. CCTV COVERAGE WEDGE GEOMETRY &amp; POSTGIS SPATIAL PROJECTION</text>
+      
+      <!-- Visual Trigonometric Wedge Graphic (Left) -->
+      <g transform="translate(30, 50)">
+        <rect width="360" height="270" rx="6" fill="#0A0416" stroke="#6D28D9" stroke-width="1" />
+        
+        <!-- Camera Node Origin -->
+        <circle cx="80" cy="200" r="12" fill="#7C3AED" stroke="#FFFFFF" stroke-width="2" filter="url(#subtleGlow)" />
+        <text x="80" y="228" fill="#FFFFFF" font-size="10" font-weight="700" text-anchor="middle">CAMERA (x0, y0)</text>
+        <text x="80" y="242" fill="#06B6D4" font-size="9" text-anchor="middle">Lat: 23.0225, Lon: 72.5714</text>
+        
+        <!-- Optical Heading Axis -->
+        <line x1="80" y1="200" x2="280" y2="70" stroke="#C4B5FD" stroke-width="1.5" stroke-dasharray="4,4" />
+        <text x="250" y="60" fill="#C4B5FD" font-size="9.5">Heading Vector (θ = 45°)</text>
+        
+        <!-- Wedge Polygon Fill -->
+        <path d="M 80 200 L 260 40 A 240 240 0 0 1 310 140 Z" fill="#10B981" fill-opacity="0.18" stroke="#10B981" stroke-width="2" />
+        
+        <!-- Distance Arc (d) -->
+        <line x1="80" y1="200" x2="310" y2="140" stroke="#10B981" stroke-width="1.5" />
+        <text x="180" y="195" fill="#10B981" font-size="9.5" font-weight="700">Detection Range (d = 120m)</text>
+        
+        <!-- FOV Angle Arc -->
+        <path d="M 140 160 A 70 70 0 0 1 155 185" fill="none" stroke="#F59E0B" stroke-width="2" />
+        <text x="165" y="175" fill="#F59E0B" font-size="9.5" font-weight="700">FOV (α = 70°)</text>
+      </g>
+      
+      <!-- Mathematical Formulation & PostGIS Details (Right) -->
+      <g transform="translate(410, 50)">
+        <rect width="365" height="270" rx="6" fill="#0A0416" stroke="#6D28D9" stroke-width="1" />
+        <text x="16" y="24" fill="#FFFFFF" font-size="11.5" font-weight="800">TRIGONOMETRIC FORMULATION</text>
+        
+        <text x="16" y="46" fill="#06B6D4" font-size="9.5" font-weight="700">Coverage Wedge Apex Coordinates:</text>
+        <text x="16" y="64" fill="#FFFFFF" font-family="monospace" font-size="10">P1 = (x0 + d·sin(θ - α/2), y0 + d·cos(θ - α/2))</text>
+        <text x="16" y="82" fill="#FFFFFF" font-family="monospace" font-size="10">P2 = (x0 + d·sin(θ + α/2), y0 + d·cos(θ + α/2))</text>
+        
+        <rect x="12" y="98" width="341" height="158" rx="4" fill="#130826" stroke="#2B1050" stroke-width="1" />
+        <text x="20" y="118" fill="#10B981" font-size="10" font-weight="700">POSTGIS SPATIAL QUERY INTEGRATION:</text>
+        <text x="20" y="136" fill="#C4B5FD" font-size="9">• Stored as native PostGIS POLYGON geometry</text>
+        <text x="20" y="152" fill="#C4B5FD" font-size="9">• GIST Spatial Index on coverage_polygon</text>
+        <text x="20" y="168" fill="#C4B5FD" font-size="9">• Queries: ST_Within(vehicle_pt, coverage_wedge)</text>
+        <text x="20" y="186" fill="#FFFFFF" font-size="9.5" font-weight="700">Automatic Blindspot Detection:</text>
+        <text x="20" y="202" fill="#C4B5FD" font-size="9">• ST_Difference detects uncovered highway gaps</text>
+        <text x="20" y="218" fill="#06B6D4" font-size="9">• Spatial Query Latency: &lt; 1.9ms over 80K nodes</text>
+      </g>
+    </g>
+    
+    <path d="M 430 360 L 430 390" stroke="#9333EA" stroke-width="2.5" marker-end="url(#arr)" />
+    
+    <!-- Part 2: Multi-Camera Highway Trajectory Reconstruction -->
+    <g transform="translate(30, 390)" filter="url(#shadow)">
+      <rect width="800" height="370" rx="8" fill="url(#cardGrad)" stroke="#9333EA" stroke-width="2" />
+      <rect x="0" y="0" width="800" height="34" rx="8" fill="#1D0E42" />
+      <text x="20" y="23" fill="#FFFFFF" font-size="13" font-weight="800">2. MULTI-CAMERA TRAJECTORY RECONSTRUCTION &amp; INTERCEPT PREDICTION</text>
+      
+      <!-- Trajectory Corridor Map Visual -->
+      <g transform="translate(20, 48)">
+        <!-- Highway Base Ribbon -->
+        <rect width="760" height="175" rx="6" fill="#0C041C" stroke="#6D28D9" stroke-width="1" />
+        
+        <!-- Road Line -->
+        <path d="M 40 100 Q 220 50 400 110 T 720 70" fill="none" stroke="#25104A" stroke-width="24" />
+        <path d="M 40 100 Q 220 50 400 110 T 720 70" fill="none" stroke="#9333EA" stroke-width="2" stroke-dasharray="8,6" />
+        
+        <!-- Sighting 1 -->
+        <g transform="translate(60, 50)">
+          <circle cx="20" cy="50" r="14" fill="#10B981" stroke="#FFFFFF" stroke-width="2" filter="url(#subtleGlow)" />
+          <text x="20" y="55" fill="#FFFFFF" font-size="11" font-weight="800" text-anchor="middle">1</text>
+          <rect x="-35" y="70" width="110" height="42" rx="4" fill="#15082E" stroke="#10B981" stroke-width="1" />
+          <text x="20" y="84" fill="#FFFFFF" font-size="9" font-weight="700" text-anchor="middle">SG Highway Junction</text>
+          <text x="20" y="96" fill="#10B981" font-size="8.5" text-anchor="middle">Cam #01 • 14:02:11</text>
+          <text x="20" y="106" fill="#C4B5FD" font-size="8" text-anchor="middle">GJ01AB1234 (Swift)</text>
+        </g>
+        
+        <!-- Sighting 2 -->
+        <g transform="translate(360, 60)">
+          <circle cx="20" cy="50" r="14" fill="#06B6D4" stroke="#FFFFFF" stroke-width="2" filter="url(#subtleGlow)" />
+          <text x="20" y="55" fill="#FFFFFF" font-size="11" font-weight="800" text-anchor="middle">2</text>
+          <rect x="-40" y="70" width="120" height="42" rx="4" fill="#15082E" stroke="#06B6D4" stroke-width="1" />
+          <text x="20" y="84" fill="#FFFFFF" font-size="9" font-weight="700" text-anchor="middle">Sanand Crossroad</text>
+          <text x="20" y="96" fill="#06B6D4" font-size="8.5" text-anchor="middle">Cam #04 • 14:07:45</text>
+          <text x="20" y="106" fill="#C4B5FD" font-size="8" text-anchor="middle">Speed: ~62 km/h</text>
+        </g>
+        
+        <!-- Sighting 3 (Predicted Intercept) -->
+        <g transform="translate(640, 20)">
+          <circle cx="20" cy="50" r="16" fill="#EF4444" stroke="#FFFFFF" stroke-width="2.5" filter="url(#subtleGlow)" />
+          <text x="20" y="55" fill="#FFFFFF" font-size="12" font-weight="800" text-anchor="middle">3</text>
+          <rect x="-55" y="72" width="150" height="52" rx="4" fill="#2E0A1E" stroke="#EF4444" stroke-width="1.5" />
+          <text x="20" y="86" fill="#EF4444" font-size="9.5" font-weight="800" text-anchor="middle">PREDICTED INTERCEPT</text>
+          <text x="20" y="98" fill="#FFFFFF" font-size="9" text-anchor="middle">Bavla Toll Plaza (Cam #09)</text>
+          <text x="20" y="110" fill="#F59E0B" font-size="8.5" font-weight="700" text-anchor="middle">ETA: 14:14:30 (In 6.5 mins)</text>
+          <text x="20" y="120" fill="#C4B5FD" font-size="8" text-anchor="middle">Distance: 6.8 km</text>
+        </g>
+      </g>
+      
+      <!-- Operational Intercept Panel -->
+      <g transform="translate(20, 235)">
+        <rect width="760" height="120" rx="6" fill="#0C041C" stroke="#6D28D9" stroke-width="1" />
+        <text x="16" y="24" fill="#F59E0B" font-size="11" font-weight="800">AUTOMATED POLICE DISPATCH &amp; INTERCEPT PROTOCOL:</text>
+        
+        <g transform="translate(16, 36)">
+          <rect width="350" height="70" rx="4" fill="#130826" stroke="#2B1050" stroke-width="1" />
+          <text x="12" y="20" fill="#FFFFFF" font-size="9.5" font-weight="700">Toll Gate Auto-Barricade Pre-Alert</text>
+          <text x="12" y="36" fill="#C4B5FD" font-size="9">• Transmits alert payload to Bavla Toll Plaza C2 node</text>
+          <text x="12" y="50" fill="#C4B5FD" font-size="9">• Fast-lane boom barrier hold configured</text>
+          <text x="12" y="64" fill="#10B981" font-size="9">Target lane camera promoted to BURST_TRACKING</text>
+        </g>
+        
+        <g transform="translate(385, 36)">
+          <rect width="360" height="70" rx="4" fill="#130826" stroke="#2B1050" stroke-width="1" />
+          <text x="12" y="20" fill="#FFFFFF" font-size="9.5" font-weight="700">Nearest PCR Interceptor Unit Alert</text>
+          <text x="12" y="36" fill="#C4B5FD" font-size="9">• Dispatches GPS coordinates to PCR Van #14 (2.1 km away)</text>
+          <text x="12" y="50" fill="#C4B5FD" font-size="9">• Live tactical HUD with vehicle color, make &amp; plate</text>
+          <text x="12" y="64" fill="#06B6D4" font-size="9">Sub-second notification via Netram Mobile Gateway</text>
+        </g>
+      </g>
+    </g>
+</svg>

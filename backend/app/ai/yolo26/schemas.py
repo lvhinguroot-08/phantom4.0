@@ -33,7 +33,31 @@ class VehicleAttributes(BaseModel):
     speed_kmph: Optional[float] = Field(None, description="Estimated speed in km/h from tracking")
     activity: Optional[str] = Field(None, description="Pedestrian activity (Walking, Standing, etc.)")
     helmet_detected: Optional[bool] = Field(None, description="Rider helmet status")
+    occupant_count: Optional[int] = Field(None, description="Number of associated occupants for two-wheelers")
+    associated_riders: List[int] = Field(default_factory=list, description="Associated rider person track IDs")
+    active_violations: List[str] = Field(default_factory=list, description="Active confirmed violations (e.g. NO_HELMET, TRIPLE_RIDING)")
     threat_level: str = Field("NORMAL", description="Threat level (NORMAL, ELEVATED, CRITICAL)")
+
+
+class TrafficViolationEvent(BaseModel):
+    """Canonical traffic violation event representation (Phase 2)."""
+    event_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    violation_type: str = Field(..., description="Violation type: NO_HELMET, TRIPLE_RIDING")
+    camera_id: str = Field(..., description="Source camera identifier")
+    timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    vehicle_track_id: int = Field(..., description="Target vehicle track ID")
+    vehicle_type: str = Field(..., description="MOTORCYCLE, SCOOTER, etc.")
+    person_track_ids: List[int] = Field(default_factory=list, description="Associated person track IDs")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Overall violation confidence")
+    severity: str = Field("MEDIUM", description="Violation severity: LOW, MEDIUM, HIGH, CRITICAL")
+    status: str = Field("CONFIRMED", description="Violation status: SUSPECTED, CONFIRMED, RESOLVED")
+    evidence_reference: Optional[str] = Field(None, description="Path or URI to annotated evidence image")
+    rider_track_id: Optional[int] = Field(None, description="Specific rider track ID for single-person violations")
+    helmet_state: Optional[str] = Field(None, description="HELMET, NO_HELMET, UNCERTAIN, TURBAN")
+    occupant_count: Optional[int] = Field(None, description="Total occupants on vehicle for over-occupancy violations")
+    vehicle_plate: Optional[str] = Field(None, description="Linked license plate recognized by ANPR")
+    plate_confidence: Optional[float] = Field(None, description="Confidence of linked license plate")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Supplementary forensic metadata")
 
 
 class DetectedObject(BaseModel):

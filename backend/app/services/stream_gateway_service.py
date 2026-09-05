@@ -23,7 +23,7 @@ import shutil
 import subprocess
 import threading
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 import uuid
 import httpx
 
@@ -131,6 +131,10 @@ class CameraRuntimeState:
         "frame_count": 0,
         "discontinuity_count": 0,
     })
+    last_frame_hash: Optional[int] = None
+    stale_frame_count: int = 0
+    is_stale: bool = False
+    total_frames_read: int = 0
 
 
 class CameraSourceRegistry:
@@ -240,6 +244,8 @@ class StreamGatewayService:
         # Active OpenCV VideoCapture readers for on-demand streams: { camera_id: cv2.VideoCapture }
         self._active_captures: Dict[str, Any] = {}
         self._capture_lock: threading.Lock = threading.Lock()
+        self._cam_locks: Dict[str, threading.Lock] = {}
+        self._cam_locks_guard: threading.Lock = threading.Lock()
 
         # Active FFmpeg worker processes: { camera_id: subprocess.Popen }
         self.active_processes: Dict[str, subprocess.Popen] = {}
@@ -250,7 +256,143 @@ class StreamGatewayService:
 
         # Persistent HTTP client for upstream proxying
         self._http_client: Optional[httpx.AsyncClient] = None
+        self._sentinel_client: Optional[httpx.AsyncClient] = None
+        self._sentinel_token: Optional[str] = None
+        self._manifest_cache: Dict[str, Tuple[str, float]] = {}
         self._health_cache: Dict[str, Dict[str, Any]] = {}
+
+        # Concurrency safety: per-segment download locks to prevent concurrent duplicate writers
+        self._segment_locks: Dict[str, asyncio.Lock] = {}
+        self._segment_locks_guard: threading.Lock = threading.Lock()
+
+        # Initial cache housekeeping on startup (clean stale tmp files, enforce bounded retention)
+        try:
+            self._perform_cache_housekeeping()
+        except Exception as hk_exc:
+            logger.debug(f"Startup cache housekeeping notice: {hk_exc}")
+
+    def _get_segment_lock(self, camera_id: str, segment_name: str) -> asyncio.Lock:
+        """Returns or creates an asyncio.Lock for a specific segment download."""
+        key = f"{camera_id}:{segment_name}"
+        with self._segment_locks_guard:
+            if key not in self._segment_locks:
+                self._segment_locks[key] = asyncio.Lock()
+            return self._segment_locks[key]
+
+    def _clean_segment_lock(self, camera_id: str, segment_name: str) -> None:
+        """Cleans up idle segment locks to prevent memory growth."""
+        key = f"{camera_id}:{segment_name}"
+        with self._segment_locks_guard:
+            lock = self._segment_locks.get(key)
+            if lock and not lock.locked():
+                self._segment_locks.pop(key, None)
+
+    def _evict_segments_for_camera(self, camera_id: str, protected_files: Optional[Set[str]] = None) -> None:
+        """
+        Enforces bounded rolling retention PER CAMERA on disk:
+        1. Keeps at most HLS_SEGMENT_RETENTION_PER_CAM newest .ts segments (default: 15).
+        2. Keeps total directory size under HLS_MAX_SEGMENT_CACHE_MB_PER_CAM (default: 25 MB).
+        3. Cleans up any stale temporary download files (.tmp*).
+        Protected files (currently being written or served) are never deleted.
+        """
+        clean_id = self.normalize_camera_id(camera_id)
+        seg_dir = Path(__file__).resolve().parent.parent.parent / "segment_cache" / clean_id
+        if not seg_dir.is_dir():
+            return
+
+        max_count = int(getattr(settings, "HLS_SEGMENT_RETENTION_PER_CAM", 15))
+        max_mb = float(getattr(settings, "HLS_MAX_SEGMENT_CACHE_MB_PER_CAM", 25.0))
+        max_bytes = int(max_mb * 1024 * 1024)
+        protected = protected_files or set()
+
+        now = time.time()
+
+        # 1. Clean stale temporary files (older than 45 seconds)
+        try:
+            for item in seg_dir.iterdir():
+                if item.is_file() and item.name.startswith(".tmp_"):
+                    try:
+                        if now - item.stat().st_mtime > 45.0:
+                            item.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+        except Exception as ex:
+            logger.debug(f"Notice cleaning temp segment files for {clean_id}: {ex}")
+
+        # 2. Enforce retention and size limits on .ts segments
+        try:
+            ts_files = []
+            total_size = 0
+            for item in seg_dir.iterdir():
+                if item.is_file() and item.name.endswith(".ts"):
+                    try:
+                        st = item.stat()
+                        ts_files.append({
+                            "path": item,
+                            "name": item.name,
+                            "mtime": st.st_mtime,
+                            "size": st.st_size,
+                        })
+                        total_size += st.st_size
+                    except Exception:
+                        pass
+
+            # Sort by mtime ascending (oldest first)
+            ts_files.sort(key=lambda x: x["mtime"])
+
+            active_count = len(ts_files)
+            for file_info in ts_files:
+                if active_count <= max_count and total_size <= max_bytes:
+                    break
+
+                fname = file_info["name"]
+                fpath = file_info["path"]
+                fsize = file_info["size"]
+
+                if fname in protected:
+                    continue
+
+                try:
+                    fpath.unlink(missing_ok=True)
+                    total_size -= fsize
+                    active_count -= 1
+                    logger.debug(f"[Cache Eviction] Pruned old segment {fname} for {clean_id}")
+                except Exception as del_err:
+                    logger.debug(f"Could not evict segment {fname} for {clean_id}: {del_err}")
+
+        except Exception as ex:
+            logger.warning(f"Error during segment eviction for {clean_id}: {ex}")
+
+    def _perform_cache_housekeeping(self) -> None:
+        """
+        Performs safe cache maintenance:
+        - Removes orphaned .tmp_* files from manifest_cache and segment_cache.
+        - Enforces rolling retention and size limits on all camera segment folders.
+        """
+        base_dir = Path(__file__).resolve().parent.parent.parent
+        manifest_dir = base_dir / "manifest_cache"
+        segment_dir = base_dir / "segment_cache"
+
+        # 1. Clean stale tmp files in manifest_cache
+        if manifest_dir.is_dir():
+            for item in manifest_dir.iterdir():
+                if item.is_file() and item.name.startswith(".tmp_"):
+                    try:
+                        item.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+
+        # 2. Housekeeping for each camera directory in segment_cache
+        if segment_dir.is_dir():
+            for cam_folder in segment_dir.iterdir():
+                if cam_folder.is_dir():
+                    self._evict_segments_for_camera(cam_folder.name)
+
+    def _get_cam_lock(self, camera_id: str) -> threading.Lock:
+        with self._cam_locks_guard:
+            if camera_id not in self._cam_locks:
+                self._cam_locks[camera_id] = threading.Lock()
+            return self._cam_locks[camera_id]
 
     async def get_http_client(self) -> httpx.AsyncClient:
         if self._http_client is None or self._http_client.is_closed:
@@ -263,26 +405,33 @@ class StreamGatewayService:
 
     def normalize_camera_id(self, camera_id: str) -> str:
         raw = str(camera_id).strip()
-        # Look up directly in source registry if available
-        src = self.source_registry.get_source(raw)
-        if src and "camera_code" in src:
-            code = src["camera_code"]
-            digits = re.sub(r"\D", "", code)
-            if digits:
-                return f"CAM-{digits.zfill(3)}"
-            return code.upper()
+        raw_lower = raw.lower()
+        # Direct match for camXX format (cam01 .. cam30)
+        if re.match(r"^cam\d+$", raw_lower):
+            return raw_lower
+        # Direct match for CAM-XXX format
+        if re.match(r"^cam-\d+$", raw_lower):
+            digits = str(int(re.sub(r"\D", "", raw_lower)))
+            return f"cam{digits.zfill(2)}"
+
+        src = self.source_registry.get_source(raw) or self.source_registry.get_source(raw_lower)
+        if src:
+            code = str(src.get("camera_id") or src.get("camera_code") or raw).lower()
+            if re.match(r"^cam\d+$", code):
+                return code
+            return code
 
         digits = re.sub(r"\D", "", raw)
-        if digits:
-            return f"CAM-{digits.zfill(3)}"
-        return raw
+        if digits and len(digits) <= 3:
+            return f"cam{digits.zfill(2)}"
+        return raw_lower
 
     def get_camera_video_path(self, camera_id: str) -> Optional[Path]:
         norm_id = self.normalize_camera_id(camera_id)
-        digits = re.sub(r"\D", "", norm_id)
-        cam_num = int(digits) if digits else 1
+        m = re.search(r"(\d{1,3})", norm_id)
+        cam_num = ((int(m.group(1)) - 1) % 30) + 1 if m else 1
         cam_code_2d = f"cam{str(cam_num).zfill(2)}"
-        cam_code_3d = f"cam{str(cam_num).zfill(3)}"
+        target_name = f"{cam_code_2d}_sample.mp4"
 
         sample_dirs = [
             Path(__file__).resolve().parent.parent.parent / "sample_assets",
@@ -292,34 +441,21 @@ class StreamGatewayService:
             Path("sample_assets"),
         ]
 
-        candidates = [
-            f"{cam_code_2d}_sample.mp4",
-            f"{cam_code_3d}_sample.mp4",
-            f"{norm_id.lower()}_sample.mp4",
-            f"{camera_id.lower()}_sample.mp4",
-            f"{cam_code_2d}.mp4",
-            f"{norm_id.lower()}.mp4",
-        ]
-
         for s_dir in sample_dirs:
             if not s_dir.exists():
                 continue
-            for name in candidates:
-                p = s_dir / name
-                if p.is_file() and p.stat().st_size > 0:
-                    return p
+            p = s_dir / target_name
+            if p.is_file() and p.stat().st_size > 0:
+                return p
+            p2 = s_dir / f"{cam_code_2d}.mp4"
+            if p2.is_file() and p2.stat().st_size > 0:
+                return p2
 
-        # Fallback to any available sample or screen recording
+        # Fallback to indexed sample video, never duplicating file 0
         for s_dir in sample_dirs:
             if not s_dir.exists():
                 continue
-            default_traffic = s_dir / "sample_traffic_cctv.mp4"
-            if default_traffic.is_file() and default_traffic.stat().st_size > 0:
-                return default_traffic
-            screen_rec = s_dir / "screen_recording_latest.mp4"
-            if screen_rec.is_file() and screen_rec.stat().st_size > 0:
-                return screen_rec
-            all_mp4s = sorted(list(s_dir.glob("*.mp4")))
+            all_mp4s = sorted(list(s_dir.glob("cam*_sample.mp4")))
             if all_mp4s:
                 return all_mp4s[(cam_num - 1) % len(all_mp4s)]
 
@@ -342,39 +478,39 @@ class StreamGatewayService:
                 rtsp_url=source.get("rtsp_url"),
                 whep_url=source.get("whep_url") or source.get("webrtc_url"),
                 hls_url=source.get("source_url") or source.get("hls_url"),
-                connection_state="LIVE",
+                connection_state="DISCOVERED",
                 last_seen=datetime.now(timezone.utc).isoformat(),
             )
         return self.camera_states[norm_id]
 
     def register_discovered_camera(self, cam_dict: Dict[str, Any]):
-        """Called by SentinelCatalogueService upon new camera discovery or sync."""
-        self.source_registry.register_camera(cam_dict)
         cam_id = str(cam_dict.get("camera_id", ""))
-        norm_id = self.normalize_camera_id(cam_id)
-
-        state = self.get_or_create_state(norm_id)
+        cam_code = cam_dict.get("camera_code", f"CAM-{cam_id.zfill(3)}")
+        self.source_registry.register_camera(cam_dict)
+        state = self.get_or_create_state(cam_code)
         state.location = cam_dict.get("location", state.location)
         state.codec = cam_dict.get("codec", state.codec)
         state.resolution = cam_dict.get("resolution", state.resolution)
-        state.fps = float(cam_dict.get("fps", state.fps))
-        state.bitrate_kbps = cam_dict.get("bitrate_kbps", state.bitrate_kbps or 2500)
-        state.live = True
+        state.fps = float(cam_dict.get("fps") or state.fps or 25.0)
+        state.bitrate_kbps = int(cam_dict.get("bitrate_kbps") or state.bitrate_kbps or 2500)
         state.rtsp_url = cam_dict.get("rtsp_url", state.rtsp_url)
         state.whep_url = cam_dict.get("whep_url", state.whep_url)
-        state.hls_url = cam_dict.get("source_url") or cam_dict.get("hls_url", state.hls_url)
-        state.last_seen = datetime.now(timezone.utc).isoformat()
-        state.connection_state = "LIVE"
-        state.reconnect_attempt = 0
+        state.hls_url = cam_dict.get("hls_url", state.hls_url)
+        state.live = bool(cam_dict.get("live", state.live))
+        if state.live:
+            state.connection_state = "LIVE"
+        else:
+            state.connection_state = "OFFLINE"
 
     def mark_camera_offline(self, camera_id: str):
         norm_id = self.normalize_camera_id(camera_id)
         if norm_id in self.camera_states:
             st = self.camera_states[norm_id]
-            st.connection_state = "LIVE"
-            st.live = True
+            st.live = False
+            st.connection_state = "OFFLINE"
 
-    def calculate_reconnect_backoff(self, attempt: int) -> float:
+
+    def calculate_backoff(self, attempt: int) -> float:
         delays = [2.0, 4.0, 8.0, 16.0, 30.0]
         idx = min(max(0, attempt - 1), len(delays) - 1)
         return delays[idx]
@@ -395,16 +531,15 @@ class StreamGatewayService:
         state.live = True
         state.last_seen = datetime.now(timezone.utc).isoformat()
 
-        clean_digits = re.sub(r"\D", "", norm_id)
-        clean_id = f"cam{clean_digits.zfill(2)}" if clean_digits else norm_id.lower()
+        clean_id = norm_id.lower()
 
-        live_whep_direct = f"http://103.250.160.189:8889/stream/{clean_id}/whep"
+        live_whep_direct = settings.get_authenticated_whep_url(clean_id)
         live_whep_proxy = f"{settings.API_V1_STR}/streams/{clean_id}/whep"
-        live_rtsp = f"rtsp://103.250.160.189:8554/stream/{clean_id}"
+        live_rtsp = settings.get_authenticated_rtsp_url(clean_id)
         live_mjpeg = f"{settings.API_V1_STR}/streams/{clean_id}/live.mjpg"
         live_snapshot = f"{settings.API_V1_STR}/streams/{clean_id}/snapshot.jpg"
         direct_video_url = f"{settings.API_V1_STR}/streams/{norm_id}/video.mp4"
-        gateway_hls = f"{settings.API_V1_STR}/streams/{norm_id}/live.m3u8"
+        gateway_hls = settings.get_sentinel_hls_url(clean_id)
 
         session_id = str(uuid.uuid4())
         session_record = {
@@ -416,6 +551,9 @@ class StreamGatewayService:
             "status": "LIVE",
         }
         self.active_sessions[session_id] = session_record
+
+        # Primary dashboard playback uses official Sentinel HLS
+        browser_url = gateway_hls
 
         return {
             "camera_id": norm_id,
@@ -434,7 +572,7 @@ class StreamGatewayService:
             "snapshot_url": live_snapshot,
             "hls_stream_url": gateway_hls,
             "video_stream_url": direct_video_url,
-            "browser_playback_url": live_whep_proxy,
+            "browser_playback_url": browser_url,
             "webrtc_playback_url": live_whep_direct,
             "is_direct_browser_supported": True,
             "profile": profile.upper(),
@@ -447,8 +585,9 @@ class StreamGatewayService:
 
     def read_camera_frame(self, camera_id: str) -> Tuple[bool, Optional[Any], float, Dict[str, Any]]:
         """
-        Reads a frame and presentation timestamp (PTS in msec) from the RTSP/video stream using TCP transport.
-        Supports H.264, H.265, and local CCTV footage files with continuous looping.
+        Reads a frame and presentation timestamp (PTS in msec) from the RTSP stream using TCP transport.
+        Verifies monotonic frame progression and detects stale/repeating frames without silent looping.
+        No silent fallback to sample video in production mode.
         Returns: (success: bool, frame: Optional[np.ndarray], pts_msec: float, source_info: Dict[str, Any])
         """
         import numpy as np
@@ -456,25 +595,22 @@ class StreamGatewayService:
 
         norm_id = self.normalize_camera_id(camera_id)
         state = self.get_or_create_state(norm_id)
-        source = self.source_registry.get_source(norm_id) or {}
-        stream_url = state.rtsp_url or source.get("rtsp_url") or ""
+        stream_url = state.rtsp_url or settings.get_authenticated_rtsp_url(norm_id)
 
-        video_path = self.get_camera_video_path(norm_id)
-
-        now_time = time.time()
         frame = None
         pts_msec = 0.0
 
-        # Attempt to read frame from active capture handle
-        with self._capture_lock:
+        # Attempt to read frame from active capture handle using per-camera lock
+        cam_lock = self._get_cam_lock(norm_id)
+        with cam_lock:
             cap = self._active_captures.get(norm_id)
             if cap is None or not cap.isOpened():
-                target_url = stream_url if stream_url else (str(video_path) if video_path else "")
+                target_url = stream_url
                 if target_url:
                     try:
-                        state.connection_state = "LIVE"
+                        state.connection_state = "CONNECTING"
+                        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
                         if target_url.startswith("rtsp"):
-                            os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
                             cap = cv2.VideoCapture(target_url, cv2.CAP_FFMPEG)
                         else:
                             cap = cv2.VideoCapture(target_url)
@@ -484,22 +620,22 @@ class StreamGatewayService:
                             state.connection_state = "LIVE"
                             state.reconnect_attempt = 0
                             state.last_error = None
-                        elif video_path and target_url != str(video_path):
-                            # Fallback to local video file
-                            cap = cv2.VideoCapture(str(video_path))
-                            if cap.isOpened():
-                                self._active_captures[norm_id] = cap
-                                state.connection_state = "LIVE"
-                                state.reconnect_attempt = 0
+                        else:
+                            # Check if explicitly in test fallback mode
+                            if getattr(settings, "ENABLE_TEST_STREAM_FALLBACK", False) or getattr(settings, "DEMO_AI_MODE", False):
+                                video_path = self.get_camera_video_path(norm_id)
+                                if video_path and video_path.is_file():
+                                    cap = cv2.VideoCapture(str(video_path))
+                                    if cap.isOpened():
+                                        self._active_captures[norm_id] = cap
+                                        state.connection_state = "LIVE"
+                                        state.last_error = "Running in explicit DEMO_MODE fallback"
+                            if not cap or not cap.isOpened():
+                                state.connection_state = "ERROR"
+                                state.last_error = f"Cannot open Sentinel RTSP stream: {target_url}"
                     except Exception as ex:
-                        if video_path:
-                            try:
-                                cap = cv2.VideoCapture(str(video_path))
-                                if cap.isOpened():
-                                    self._active_captures[norm_id] = cap
-                                    state.connection_state = "LIVE"
-                            except Exception:
-                                pass
+                        state.connection_state = "ERROR"
+                        state.last_error = str(ex)
 
             if cap and cap.isOpened():
                 try:
@@ -509,34 +645,48 @@ class StreamGatewayService:
                         raw_pts = cap.get(cv2.CAP_PROP_POS_MSEC)
                         pts_msec = float(raw_pts) if raw_pts > 0 else (time.perf_counter() * 1000.0)
 
+                        # Detect frozen / repeated stale frames via lightweight downsample hash
+                        try:
+                            small = cv2.resize(raw_frame, (16, 16))
+                            curr_hash = hash(small.tobytes())
+                            if state.last_frame_hash is not None and state.last_frame_hash == curr_hash:
+                                state.stale_frame_count += 1
+                                if state.stale_frame_count >= 10:
+                                    state.is_stale = True
+                                    state.connection_state = "STALE"
+                            else:
+                                state.stale_frame_count = 0
+                                state.is_stale = False
+                                state.last_frame_hash = curr_hash
+                                state.connection_state = "LIVE"
+                        except Exception:
+                            state.connection_state = "LIVE"
+
                         last_pts = state.pts_state.get("last_pts_msec", 0.0)
                         delta_pts = pts_msec - last_pts if last_pts > 0 else 40.0
                         state.pts_state["last_pts_msec"] = pts_msec
                         state.pts_state["delta_pts_msec"] = delta_pts
                         state.pts_state["frame_count"] = state.pts_state.get("frame_count", 0) + 1
+                        state.total_frames_read += 1
 
-                        state.connection_state = "LIVE"
                         state.consecutive_decode_errors = 0
                         state.last_seen = datetime.now(timezone.utc).isoformat()
+                        state.last_error = None
                     else:
-                        # Video file hit EOF -> rewind and loop seamlessly
-                        total_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
-                        curr_frame = cap.get(cv2.CAP_PROP_POS_FRAMES)
-                        if total_frames > 0 and (curr_frame >= total_frames - 2 or curr_frame == 0):
-                            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                            ret2, raw_frame2 = cap.read()
-                            if ret2 and raw_frame2 is not None and raw_frame2.size > 0:
-                                frame = raw_frame2
-                                state.connection_state = "LIVE"
-                                state.last_seen = datetime.now(timezone.utc).isoformat()
-                        elif video_path:
-                            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                            ret2, raw_frame2 = cap.read()
-                            if ret2 and raw_frame2 is not None:
-                                frame = raw_frame2
-                                state.connection_state = "LIVE"
+                        # Stream reached EOF or lost frames: DO NOT silently loop! Mark offline/error.
+                        state.connection_state = "OFFLINE"
+                        state.live = False
+                        state.last_error = "Stream disconnected or EOF reached"
+                        if norm_id in self._active_captures:
+                            self._active_captures.pop(norm_id, None)
+                        try:
+                            cap.release()
+                        except Exception:
+                            pass
                 except Exception as ex:
                     logger.debug(f"[{norm_id}] Frame read exception: {ex}")
+                    state.connection_state = "ERROR"
+                    state.last_error = str(ex)
 
         source_info = self._build_source_info(norm_id, state)
         return (frame is not None), frame, pts_msec, source_info
@@ -551,6 +701,10 @@ class StreamGatewayService:
             "bitrate_kbps": state.bitrate_kbps,
             "live": state.live,
             "connection_state": state.connection_state,
+            "stream_status": state.connection_state,
+            "is_stale": getattr(state, "is_stale", False),
+            "stale_frame_count": getattr(state, "stale_frame_count", 0),
+            "total_frames_read": getattr(state, "total_frames_read", 0),
             "last_seen": state.last_seen,
             "last_error": state.last_error,
             "reconnect_attempt": state.reconnect_attempt,
@@ -560,7 +714,8 @@ class StreamGatewayService:
     def release_capture(self, camera_id: str):
         """Releases OpenCV capture handle and frees system resources."""
         norm_id = self.normalize_camera_id(camera_id)
-        with self._capture_lock:
+        cam_lock = self._get_cam_lock(norm_id)
+        with cam_lock:
             if norm_id in self._active_captures:
                 cap = self._active_captures.pop(norm_id)
                 try:
@@ -592,14 +747,22 @@ class StreamGatewayService:
                 return {
                     "camera_id": norm_id,
                     "status": state.connection_state,
+                    "stream_status": state.connection_state,
                     "connection_state": state.connection_state,
+                    "is_live": is_live,
+                    "is_stale": getattr(state, "is_stale", False),
                     "http_status": res.status_code,
                     "latency_ms": latency_ms if is_live else None,
                     "fps": state.fps if is_live else 0.0,
                     "codec": state.codec,
                     "resolution": state.resolution,
+                    "frame_counter": state.pts_state.get("frame_count", 0),
+                    "total_frames_read": getattr(state, "total_frames_read", 0),
                     "last_seen": state.last_seen,
+                    "last_frame_timestamp": state.last_seen,
                     "reconnect_attempt": state.reconnect_attempt,
+                    "reconnect_count": state.reconnect_attempt,
+                    "error_message": state.last_error,
                 }
             except Exception as ex:
                 logger.debug(f"Probe upstream failed for {norm_id}: {ex}")
@@ -607,14 +770,22 @@ class StreamGatewayService:
         return {
             "camera_id": norm_id,
             "status": state.connection_state,
+            "stream_status": state.connection_state,
             "connection_state": state.connection_state,
+            "is_live": state.connection_state == "LIVE",
+            "is_stale": getattr(state, "is_stale", False),
             "fps": state.fps if state.connection_state == "LIVE" else 0.0,
             "latency_ms": 65 if state.connection_state == "LIVE" else None,
             "codec": state.codec,
             "resolution": state.resolution,
+            "frame_counter": state.pts_state.get("frame_count", 0),
+            "total_frames_read": getattr(state, "total_frames_read", 0),
             "last_seen": state.last_seen,
+            "last_frame_timestamp": state.last_seen,
             "last_error": state.last_error,
+            "error_message": state.last_error,
             "reconnect_attempt": state.reconnect_attempt,
+            "reconnect_count": state.reconnect_attempt,
         }
 
     async def get_hls_manifest(self, camera_id: str) -> Tuple[str, str]:
@@ -795,6 +966,322 @@ class StreamGatewayService:
                     pass
         self.active_processes.clear()
         self.active_sessions.clear()
+
+        # Cache Housekeeping: prune temporary files and enforce retention across all camera segment folders
+        try:
+            self._perform_cache_housekeeping()
+        except Exception as ex:
+            logger.debug(f"Cache housekeeping notice: {ex}")
+
+    async def get_authenticated_sentinel_client(self) -> httpx.AsyncClient:
+        """
+        Maintains a single persistent, authenticated HTTP session with Sentinel.
+        Sentinel enforces 'one session per IP' so all requests MUST share the same session.
+        """
+        if not hasattr(self, "_auth_lock") or self._auth_lock is None:
+            self._auth_lock = asyncio.Lock()
+
+        async with self._auth_lock:
+            if not hasattr(self, "_sentinel_client") or self._sentinel_client is None or self._sentinel_client.is_closed:
+                self._sentinel_client = httpx.AsyncClient(
+                    timeout=httpx.Timeout(25.0, connect=10.0),
+                    follow_redirects=True,
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+                        "Origin": settings.SENTINEL_BASE_URL,
+                        "Referer": f"{settings.SENTINEL_BASE_URL}/",
+                        "Accept": "*/*",
+                    },
+                )
+
+            # Check if active token is in cookies.txt
+            if not getattr(self, "_sentinel_token", None):
+                cookie_file = Path("cookies.txt")
+                if cookie_file.is_file():
+                    try:
+                        content = cookie_file.read_text(encoding="utf-8")
+                        for line in content.splitlines():
+                            if "sentinel" in line:
+                                parts = line.split()
+                                if len(parts) >= 7 and "sentinel" in parts:
+                                    idx = parts.index("sentinel")
+                                    self._sentinel_token = parts[idx + 1]
+                                    self._sentinel_client.cookies.set("sentinel", self._sentinel_token, domain="cctv.corp8.cloud")
+                                    self._sentinel_client.headers["Cookie"] = f"sentinel={self._sentinel_token}"
+                                    logger.info("Loaded active Sentinel session cookie from cookies.txt")
+                                    break
+                    except Exception as ce:
+                        logger.warning(f"Could not read cookies.txt: {ce}")
+
+            # If still no token, perform curl login
+            if not getattr(self, "_sentinel_token", None):
+                user = settings.SENTINEL_RTSP_USER
+                password = settings.SENTINEL_RTSP_PASSWORD
+                if user and password:
+                    try:
+                        login_url = f"{settings.SENTINEL_BASE_URL.rstrip('/')}/auth/login"
+                        cmd = [
+                            "curl.exe", "-4", "-s", "--max-time", "25",
+                            "-c", "cookies.txt",
+                            "-d", f"email={user}&password={password}",
+                            login_url,
+                        ]
+                        proc = await asyncio.create_subprocess_exec(*cmd)
+                        await proc.communicate()
+                        if Path("cookies.txt").is_file():
+                            content = Path("cookies.txt").read_text(encoding="utf-8")
+                            for line in content.splitlines():
+                                if "sentinel" in line:
+                                    parts = line.split()
+                                    if len(parts) >= 7 and "sentinel" in parts:
+                                        idx = parts.index("sentinel")
+                                        self._sentinel_token = parts[idx + 1]
+                                        self._sentinel_client.cookies.set("sentinel", self._sentinel_token, domain="cctv.corp8.cloud")
+                                        self._sentinel_client.headers["Cookie"] = f"sentinel={self._sentinel_token}"
+                                        logger.info("Successfully established authenticated Sentinel session via curl helper")
+                                        break
+                    except Exception as e:
+                        logger.error(f"Failed to authenticate Sentinel HLS session: {e}")
+
+            return self._sentinel_client
+
+    async def get_hls_manifest(self, camera_id: str) -> Tuple[str, str]:
+        """
+        Proxies live HLS manifest from Sentinel, rewrites encryption key URI
+        and media segment URIs to route through the Phantom HLS reverse proxy.
+        Caches manifest on disk and in memory with strict TTL to prevent stale pinning.
+        """
+        clean_id = self.normalize_camera_id(camera_id)
+        now = time.time()
+        ttl = float(getattr(settings, "HLS_MANIFEST_DISK_TTL_SEC", 6.0))
+
+        # 0. Check memory cache with strict TTL
+        if hasattr(self, "_manifest_cache") and clean_id in self._manifest_cache:
+            cached_text, cached_time = self._manifest_cache[clean_id]
+            if (now - cached_time) < ttl:
+                return cached_text, "application/vnd.apple.mpegurl"
+
+        # 1. Try manifest_cache directory on disk if fresh (< TTL)
+        cache_dir = Path(__file__).resolve().parent.parent.parent / "manifest_cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cached_file = cache_dir / f"{clean_id}.m3u8"
+
+        manifest_text = None
+        if cached_file.is_file() and cached_file.stat().st_size > 100:
+            file_mtime = cached_file.stat().st_mtime
+            if (now - file_mtime) < ttl:
+                try:
+                    manifest_text = cached_file.read_text(encoding="utf-8")
+                except Exception as ex:
+                    logger.warning(f"Failed to read disk cached manifest for {clean_id}: {ex}")
+
+        # 2. If not fresh or not on disk, fetch a fresh authenticated Sentinel manifest
+        if not manifest_text or "#EXTM3U" not in manifest_text:
+            target_hls = settings.get_sentinel_hls_url(clean_id)
+            cookie_file = Path(__file__).resolve().parent.parent.parent / "cookies.txt"
+            cmd = [
+                "curl.exe", "-4", "-s", "--max-time", "10",
+                "-b", str(cookie_file),
+                "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+                "-H", f"Referer: {settings.SENTINEL_BASE_URL}/",
+                target_hls,
+            ]
+            fetched_fresh = False
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                )
+                stdout, _ = await proc.communicate()
+                if stdout and b"#EXTM3U" in stdout:
+                    raw_text = stdout.decode("utf-8", errors="replace")
+                    manifest_text = raw_text
+                    fetched_fresh = True
+
+                    # Atomic write to disk via temporary file
+                    tmp_file = cache_dir / f".tmp_{clean_id}_{uuid.uuid4().hex[:6]}.m3u8"
+                    try:
+                        tmp_file.write_text(manifest_text, encoding="utf-8")
+                        tmp_file.replace(cached_file)
+                    except Exception as write_err:
+                        logger.debug(f"Notice atomic manifest write for {clean_id}: {write_err}")
+                        try:
+                            tmp_file.unlink(missing_ok=True)
+                        except Exception:
+                            pass
+            except Exception as e:
+                logger.warning(f"Error fetching fresh HLS manifest via curl for {clean_id}: {e}")
+
+            # Fallback if fresh upstream fetch failed: use stale disk cache if available rather than breaking stream
+            if not fetched_fresh and (not manifest_text or "#EXTM3U" not in manifest_text):
+                if cached_file.is_file() and cached_file.stat().st_size > 100:
+                    try:
+                        manifest_text = cached_file.read_text(encoding="utf-8")
+                        logger.warning(f"Upstream Sentinel fetch failed; using existing disk manifest as temporary fallback for {clean_id}")
+                    except Exception:
+                        pass
+
+        if manifest_text and "#EXTM3U" in manifest_text:
+            # Rewrite AES-128 Encryption Key URI
+            manifest_text = re.sub(
+                r'URI=["\'][^"\']*enc\.key[^"\']*["\']',
+                f'URI="/api/v1/streams/{clean_id}/enc.key"',
+                manifest_text,
+            )
+
+            # Rewrite Segment lines to proxy route (preserves all tags, including #EXT-X-PLAYLIST-TYPE:VOD)
+            lines = manifest_text.splitlines()
+            rewritten_lines = []
+            for line in lines:
+                s = line.strip()
+                if s and not s.startswith("#") and (".ts" in s or ".m4s" in s or ".mp4" in s):
+                    seg_file = s.split("/")[-1].split("?")[0]
+                    rewritten_lines.append(f"/api/v1/streams/{clean_id}/{seg_file}")
+                else:
+                    rewritten_lines.append(line)
+
+            final_manifest = "\n".join(rewritten_lines)
+            if not hasattr(self, "_manifest_cache"):
+                self._manifest_cache = {}
+            self._manifest_cache[clean_id] = (final_manifest, now)
+            return final_manifest, "application/vnd.apple.mpegurl"
+
+        playlist = (
+            f"#EXTM3U\n"
+            f"#EXT-X-VERSION:6\n"
+            f"#EXT-X-TARGETDURATION:8\n"
+            f"#EXT-X-MEDIA-SEQUENCE:0\n"
+        )
+        return playlist, "application/vnd.apple.mpegurl"
+
+    async def get_hls_segment(self, camera_id: str, segment_path: str) -> Tuple[bytes, str]:
+        """
+        Proxies binary HLS MPEG-TS segment directly from Sentinel host using curl with Windows Schannel.
+        Enforces:
+        1. Atomic temporary downloads (never serves partially-written files)
+        2. Per-segment concurrency lock (one writer, others wait and reuse)
+        3. Bounded rolling retention per camera (max 15 newest segments, max 25 MB)
+        4. Camera isolation (segment_cache/<camera_id>/)
+        """
+        clean_id = self.normalize_camera_id(camera_id)
+
+        # 0. Check for local worker chunk route if applicable
+        if segment_path.startswith("local___"):
+            chunk_name = segment_path.replace("local___", "")
+            local_file = self.cache_root / clean_id / chunk_name
+            if local_file.is_file():
+                return local_file.read_bytes(), "video/mp2t"
+
+        clean_segment = segment_path.strip().lstrip("/").split("/")[-1].split("?")[0]
+        if not (clean_segment.endswith(".ts") or clean_segment.endswith(".m4s") or clean_segment.endswith(".mp4")):
+            return b"", "application/octet-stream"
+
+        seg_dir = Path(__file__).resolve().parent.parent.parent / "segment_cache" / clean_id
+        seg_dir.mkdir(parents=True, exist_ok=True)
+        cached_seg = seg_dir / clean_segment
+
+        # 1. Fast path: check if segment already cached and non-empty
+        if cached_seg.is_file() and cached_seg.stat().st_size > 0:
+            try:
+                data = cached_seg.read_bytes()
+                if len(data) > 0:
+                    return data, "video/mp2t"
+            except Exception as read_err:
+                logger.debug(f"Notice reading cached segment {clean_segment} for {clean_id}: {read_err}")
+
+        # 2. Concurrency Safety: Per-segment lock ensures only one active downloader
+        seg_lock = self._get_segment_lock(clean_id, clean_segment)
+        async with seg_lock:
+            # Double-check inside lock in case another coroutine downloaded it while we waited
+            if cached_seg.is_file() and cached_seg.stat().st_size > 0:
+                try:
+                    data = cached_seg.read_bytes()
+                    if len(data) > 0:
+                        return data, "video/mp2t"
+                except Exception:
+                    pass
+
+            # Download via curl to a safe temporary file
+            cookie_file = Path(__file__).resolve().parent.parent.parent / "cookies.txt"
+            seg_url = f"{settings.SENTINEL_BASE_URL.rstrip('/')}/{clean_id}/{clean_segment}"
+            tmp_seg = seg_dir / f".tmp_{clean_segment}_{uuid.uuid4().hex[:6]}"
+
+            cmd = [
+                "curl.exe", "-4", "-s", "--max-time", "30",
+                "-b", str(cookie_file),
+                "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+                "-H", f"Referer: {settings.SENTINEL_BASE_URL}/{clean_id}/index.m3u8",
+                seg_url,
+                "-o", str(tmp_seg),
+            ]
+
+            success = False
+            try:
+                proc = await asyncio.create_subprocess_exec(*cmd)
+                await proc.communicate()
+
+                # Verify successful download and non-zero size
+                if tmp_seg.is_file() and tmp_seg.stat().st_size > 0:
+                    # Atomic rename to final segment file
+                    tmp_seg.replace(cached_seg)
+                    success = True
+                else:
+                    try:
+                        tmp_seg.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.warning(f"Error proxying segment {clean_segment} for {clean_id}: {e}")
+                try:
+                    tmp_seg.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+            # 3. Post-download Eviction: Enforce retention & size limits
+            if success and cached_seg.is_file():
+                self._evict_segments_for_camera(clean_id, protected_files={clean_segment})
+                return cached_seg.read_bytes(), "video/mp2t"
+
+        self._clean_segment_lock(clean_id, clean_segment)
+        return b"", "application/octet-stream"
+
+    async def get_hls_key(self, camera_id: str) -> Tuple[bytes, str]:
+        """
+        Proxies the 16-byte AES-128 decryption key from Sentinel host.
+        Caches the key in memory and disk for zero-latency instant retrieval across all player instances.
+        """
+        if hasattr(self, "_cached_aes_key") and self._cached_aes_key and len(self._cached_aes_key) == 16:
+            return self._cached_aes_key, "application/octet-stream"
+
+        # Check disk cache
+        cache_dir = Path(__file__).resolve().parent.parent.parent / "manifest_cache"
+        key_file = cache_dir / "enc.key"
+        if key_file.is_file() and key_file.stat().st_size == 16:
+            self._cached_aes_key = key_file.read_bytes()
+            return self._cached_aes_key, "application/octet-stream"
+
+        # Fetch via curl
+        clean_id = self.normalize_camera_id(camera_id)
+        cookie_file = Path(__file__).resolve().parent.parent.parent / "cookies.txt"
+        key_url = f"{settings.SENTINEL_BASE_URL.rstrip('/')}/enc.key"
+        cmd = [
+            "curl.exe", "-4", "-s", "--max-time", "15",
+            "-b", str(cookie_file),
+            "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+            "-H", f"Referer: {settings.SENTINEL_BASE_URL}/{clean_id}/index.m3u8",
+            key_url,
+            "-o", str(key_file),
+        ]
+        try:
+            proc = await asyncio.create_subprocess_exec(*cmd)
+            await proc.communicate()
+            if key_file.is_file() and key_file.stat().st_size == 16:
+                self._cached_aes_key = key_file.read_bytes()
+                return self._cached_aes_key, "application/octet-stream"
+        except Exception as e:
+            logger.warning(f"Error proxying AES key for {clean_id}: {e}")
+
+        return b"", "application/octet-stream"
+
 
 
 class Corp8StreamProvider:
